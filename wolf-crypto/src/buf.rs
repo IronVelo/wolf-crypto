@@ -1,3 +1,4 @@
+//! Types for Keys, IVs, and Generally Sensitive Bytes
 use zeroize::Zeroize;
 use core::convert::TryFrom;
 

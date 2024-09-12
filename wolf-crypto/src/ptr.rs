@@ -1,3 +1,5 @@
+#![allow(dead_code)] // WIP
+
 use core::ops;
 use core::fmt;
 

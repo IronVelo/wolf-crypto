@@ -1,7 +1,7 @@
+//! Cryptographic Hash Algorithms
 
 #[macro_use]
 mod api_gen;
-
 #[doc(hidden)]
 pub mod sha256;
 #[doc(hidden)]

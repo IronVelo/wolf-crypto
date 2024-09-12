@@ -1,3 +1,5 @@
+//! Convenient Error Handling and Accumulation
+
 use core::ffi::c_int;
 
 #[must_use = "You must handle the potential error"]

@@ -1,3 +1,4 @@
+//! Advanced Encryption Standard (AES)
 // macro_rules! impl_aes_new {
 //     ($self:ident, $lt:lifetime, $nl:lifetime, $nonce_ty:ty) => {
 //         pub fn new(key: &$lt $crate::aes::Key, nonce: &$nl $nonce_ty) -> Result<$self, ()> {

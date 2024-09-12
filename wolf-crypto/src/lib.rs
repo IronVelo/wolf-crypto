@@ -4,7 +4,7 @@
 #[macro_use]
 mod macros;
 
-pub mod ptr;
+mod ptr;
 pub mod buf;
 pub mod opaque_res;
 mod sealed;
