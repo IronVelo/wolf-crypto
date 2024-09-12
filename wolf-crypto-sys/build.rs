@@ -50,6 +50,7 @@ fn main() {
         .clang_arg("-DHAVE_AESGCM")
         .clang_arg("-DWOLFSSL_AES_COUNTER")
         .clang_arg("-DWOLFSSL_AES_CBC_LENGTH_CHECKS")
+        .clang_arg("-DWOLFSSL_SHA224")
         .clang_arg("-DWOLFSSL_SHA384")
         .clang_arg("-DWOLFSSL_SHA512")
         .clang_arg("-DWOLFSSL_SHA3")
@@ -59,7 +60,7 @@ fn main() {
         .clang_arg("-DHAVE_BLAKE2S")
         .clang_arg("-DWOLFSSL_RIPEMD")
         .clang_arg("-DHAVE_RIPEMD");
-        // .clang_arg("-DHAVE_FIPS");
+        //.clang_arg("-DHAVE_FIPS");
 
     // if is_x86_target() {
     //     bindings = bindings.clang_arg("-DWOLFSSL_AESNI")
@@ -105,6 +106,7 @@ fn main() {
         .define("HAVE_AES_DECRYPT", None)
         .define("WOLFSSL_AES_COUNTER", None)
         .define("WOLFSSL_AES_CBC_LENGTH_CHECKS", None)
+        .define("WOLFSSL_SHA224", None)
         .define("WOLFSSL_SHA384", None)
         .define("WOLFSSL_SHA512", None)
         .define("WOLFSSL_SHA3", None)
@@ -114,7 +116,7 @@ fn main() {
         .define("HAVE_BLAKE2B", None)
         .define("WOLFSSL_RIPEMD", None)
         .define("HAVE_RIPEMD", None);
-        //.define("HAVE_FIPS", None);
+        // .define("HAVE_FIPS", None);
 
     // if is_x86_target() {
     //     build.define("WOLFSSL_AESNI", None)
