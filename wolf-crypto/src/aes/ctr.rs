@@ -263,6 +263,7 @@ impl_aes_type! {
         /// let mut original = [0u8; 32];
         /// # unsafe {
         /// assert!(AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .apply_keystream_unchecked(output.as_slice(), original.as_mut_slice())
         ///     .is_ok());
         /// # }
