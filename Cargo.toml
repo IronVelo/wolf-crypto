@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "wolf-crypto-sys",
+    "wolf-crypto",
+]
+
+resolver = "2"
+
+[profile.bench]
+lto = true
+opt-level = 3
+debug-assertions = false

@@ -1,0 +1,16 @@
+[package]
+name = "wolf-crypto-sys"
+version = "0.1.0-alpha"
+edition = "2021"
+license = "GPL-2"
+categories = ["no-std", "cryptography"]
+keywords = ["sha2", "sha3", "aes", "crypto", "digest"]
+authors = ["Clelland Green <cg@ironvelo.com>"]
+repository = "https://github.com/CleveGreen/wolf-crypto"
+readme = "README.org"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.70.1"
+cc = "1.0"

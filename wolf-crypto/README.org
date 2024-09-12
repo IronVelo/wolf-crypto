@@ -1,0 +1,22 @@
+*WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.*
+
+** =wolf-crypto=
+
+This library seeks to provide a safe, zero-cost, API for =wolfcrypt= by wolfSSL. It is in its very early stages, some
+feature flags are misleading, for instance =allow-non-fips= implies that when disabled only FIPS 140-3 certified
+cryptography is used. This is not currently the case due to the associated =wolf-crypto-sys= not currently leveraging
+the =FIPS-MODE= feature. This feature will eventually be enabled, as it was my original reason for beginning to work on
+this, though the library as previously mentioned is incredibly immature.
+
+Currently, the =hash= module is the most tested segment of this codebase, outside of this module and the =aes= module
+I personally would not be comfortable using anything in a general purpose application (not any of my professional
+work in security).
+
+** License
+
+This library is under GPLv2 licensing *unless* you purchased a commercial license from wolfSSL.
+
+** Notes:
+
+- Affiliation: I am not affiliated with wolfSSL, I just enjoy security and have appreciation for their work.
+- Why is this named =wolf-crypto= and not =wolfcrypt=: I did not want to take the official name by wolfSSL.
