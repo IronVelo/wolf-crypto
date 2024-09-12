@@ -2,7 +2,7 @@
 name = "wolf-crypto-sys"
 version = "0.1.0-alpha"
 edition = "2021"
-license = "GPL-2"
+license = "GPL-2.0-only"
 categories = ["no-std", "cryptography"]
 keywords = ["sha2", "sha3", "aes", "crypto", "digest"]
 authors = ["Clelland Green <cg@ironvelo.com>"]
