@@ -17,7 +17,8 @@ allow-non-fips = []
 default = ["panic-api", "allow-non-fips"]
 
 [dependencies]
-wolf-crypto-sys = { version = "0.1.0-alpha" }
+wolf-crypto-sys = { version = "0.1.0-alpha.1" }
+# wolf-crypto-sys = { path = "../wolf-crypto-sys" }
 zeroize = { version = "1.7.0" }
 
 [dev-dependencies]
