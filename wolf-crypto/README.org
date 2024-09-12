@@ -12,11 +12,106 @@ Currently, the =hash= module is the most tested segment of this codebase, outsid
 I personally would not be comfortable using anything in a general purpose application (not any of my professional
 work in security).
 
+** Current Priority and Roadmap
+
+- Focus on implementing and stabilizing the core FIPS 140-3 compatible algorithms.
+- Improve test coverage in hashing, symmetric encryption, and AEAD modules.
+- Incrementally implement and test asymmetric cryptographic functions (RSA, ECDSA, ECDH).
+- Enable =FIPS-MODE= support in =wolf-crypto-sys= to align with the FIPS compliance goals.
+
+*** Roadmap [0/5]
+
+- [-] Hashing [3/6]
+  - [X] =SHA2= [6/6]
+    - [X] =SHA-224=
+    - [X] =SHA-256=
+    - [X] =SHA-384=
+    - [X] =SHA-512=
+    - [X] =SHA-512/224=
+    - [X] =SHA-512/256=
+  - [-] =SHA3= [4/5]
+    - [X] =SHA3-224=
+    - [X] =SHA3-256=
+    - [X] =SHA3-384=
+    - [X] =SHA3-512=
+    - [ ] =SHAKE= [0/2]
+      - [ ] =SHAKE128=
+      - [ ] =SHAKE256=
+  - [ ] =SHA=
+  - [X] =RIPEMD-160=
+  - [X] =MD= [2/2]
+    - [X] =MD5=
+    - [X] =MD4=
+      # NOTE: Unless explicitly requested I will not be supporting MD2
+  - [-] =BLAKE2= [1/2]
+    - [X] =BLAKE2b=
+    - [ ] =BLAKE2s=
+
+- [-] AEAD [1/5]
+  - [X] =AES-GCM= [3/3]
+    - [X] =256=
+    - [X] =192=
+    - [X] =128=
+  - [ ] =ChaCha20-Poly1305= [0/2]
+    - [ ] =256=
+    - [ ] =128=
+  - [ ] =AES-CCM= [0/3]
+    - [ ] =256=
+    - [ ] =192=
+    - [ ] =128=
+  - [ ] =AES-EAX= [0/3]
+    - [ ] =256=
+    - [ ] =192=
+    - [ ] =128=
+  - [ ] =AES-SIV= [0/3]
+    - [ ] =256=
+    - [ ] =192=
+    - [ ] =128=
+      
+- [-] Symmetric Encryption [0/3]
+  - [-] =AES= [1/4]
+    - [X] =CTR= [3/3]
+      - [X] =256=
+      - [X] =192=
+      - [X] =128=
+    - [ ] =CBC= [0/3]
+      - [ ] =256=
+      - [ ] =192=
+      - [ ] =128=
+    - [ ] =XTS= [0/2]
+      - [ ] =256=
+      - [ ] =128=
+    - [ ] =CFB= [0/3]
+      - [ ] =256=
+      - [ ] =192=
+      - [ ] =128=
+  - [ ] =ChaCha20= [0/2]
+    - [ ] =256=
+    - [ ] =128=
+  - [ ] =3DES= [0/1]
+    - [ ] =168=
+    # DES is supported by wolfcrypt, but again, I will not support it unless explicitly asked.
+
+- [ ] MAC [0/2]
+  - [ ] HMAC [0/9]
+    - [ ] SHA-256
+    - [ ] SHA-384
+    - [ ] SHA-512
+    - [ ] SHA3-224
+    - [ ] SHA3-256
+    - [ ] SHA3-384
+    - [ ] SHA3-512
+    - [ ] SHA
+    - [ ] MD5
+  - [ ] Poly1305
+
+- [ ] Writing the Asymmetric Encryption Section
+
 ** License
 
 This library is under GPLv2 licensing *unless* you purchased a commercial license from wolfSSL.
 
-** Notes:
+** Notes
 
 - Affiliation: I am not affiliated with wolfSSL, I just enjoy security and have appreciation for their work.
 - Why is this named =wolf-crypto= and not =wolfcrypt=: I did not want to take the official name by wolfSSL.
