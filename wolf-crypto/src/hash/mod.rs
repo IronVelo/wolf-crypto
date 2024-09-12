@@ -3,6 +3,8 @@
 #[macro_use]
 mod api_gen;
 #[doc(hidden)]
+pub mod sha224;
+#[doc(hidden)]
 pub mod sha256;
 #[doc(hidden)]
 pub mod sha384;
@@ -21,7 +23,9 @@ pub mod sha3_384;
 #[doc(hidden)]
 pub mod sha3_512;
 
+
 pub use {
+    sha224::Sha224,
     sha256::Sha256,
     sha384::Sha384,
     sha512::Sha512,
