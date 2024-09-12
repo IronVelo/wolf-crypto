@@ -2,7 +2,7 @@
 name = "wolf-crypto"
 version = "0.1.0-alpha"
 edition = "2021"
-license = "GPL-2"
+license = "GPL-2.0-only"
 categories = ["no-std", "cryptography"]
 keywords = ["sha2", "sha3", "aes", "crypto", "digest"]
 authors = ["Clelland Green <cg@ironvelo.com>"]
@@ -17,7 +17,7 @@ allow-non-fips = []
 default = ["panic-api", "allow-non-fips"]
 
 [dependencies]
-wolf-crypto-sys = { path = "../wolf-crypto-sys" }
+wolf-crypto-sys = { version = "0.1.0-alpha" }
 zeroize = { version = "1.7.0" }
 
 [dev-dependencies]
