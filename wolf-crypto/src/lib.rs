@@ -1,5 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_builtins)]
+#[cfg(test)]
+extern crate alloc;
 
 #[macro_use]
 mod macros;
