@@ -1,7 +1,7 @@
 use wolf_crypto_sys::{
     wc_Sha3,
     wc_Sha3_224_Update, wc_Sha3_224_Final,
-    wc_InitSha3_224, wc_Sha3_224_Free,
+    wc_InitSha3_224, wc_Sha3_224_Free
 };
 
 make_api! {

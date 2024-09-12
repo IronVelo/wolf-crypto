@@ -920,3 +920,17 @@ macro_rules! make_api {
         sha2::$name
     };
 }
+
+/*macro_rules! dyn_out {
+    (
+    name: $name:ident,
+    wc: $wc:ty,
+    $(max-bs: $bs:literal,)?
+    init: $init:ident $(, heap: $heap:expr, devid: $devId:expr)?,
+    update: $update:ident,
+    finalize: $finalize:ident
+    $(, free: $free:ident)?
+    ) => {
+
+    }
+}*/
