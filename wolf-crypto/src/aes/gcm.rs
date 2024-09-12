@@ -4,8 +4,9 @@ use core::ptr::{addr_of_mut};
 use core::ffi::{c_int};
 use wolf_crypto_sys::{Aes as AesLL, wc_AesGcmEncrypt, wc_AesGcmDecrypt, wc_AesGcmSetKey, wc_AesFree};
 use core::fmt;
+use core::mem::MaybeUninit;
 use crate::opaque_res::Res;
-use crate::ptr::{ConstPtr, MutPtr};
+use crate::ptr::{ConstPtr};
 
 #[repr(transparent)]
 pub struct AesGcm {
@@ -100,38 +101,23 @@ impl Tag {
 }
 
 #[inline(always)]
-#[cfg_attr(debug_assertions, must_use)]
-pub(crate) unsafe fn aes_set_key_unchecked(aes: MutPtr<AesLL>, key: ConstPtr<Key>) -> c_int {
+#[must_use]
+pub(crate) unsafe fn aes_set_key(aes: *mut AesLL, key: ConstPtr<Key>) -> c_int {
     wc_AesGcmSetKey(
-        aes.get(),
+        aes,
         key.as_slice().as_ptr(),
         key.capacity() as u32
     )
 }
 
-#[inline(always)]
-pub(crate) unsafe fn aes_set_key(aes: MutPtr<AesLL>, key: ConstPtr<Key>) {
-    // Due to our key type only allowing valid sizes this should be infallible. Though, with debug
-    // assertions we will ensure that this is accurate in our model checking.
-
-    #[cfg(debug_assertions)] {
-        assert_eq!(aes_set_key_unchecked(aes, key), 0);
-    }
-    #[cfg(not(debug_assertions))] {
-        aes_set_key_unchecked(aes, key);
-    }
-}
-
 impl AesGcm {
     const MODE: AesM = AesM::ENCRYPT;
 
-    pub fn new(key: &Key) -> Self {
+    pub fn new(key: &Key) -> Result<Self, ()> {
         unsafe {
-            let mut aes: AesLL = core::mem::zeroed();
-            let aes_ptr = MutPtr::new(addr_of_mut!(aes));
-            init_aes(aes_ptr.copy());
-            aes_set_key(aes_ptr, ConstPtr::new(key));
-            Self::with_aes(aes)
+            let (mut aes, mut res) = init_aes(MaybeUninit::<AesLL>::uninit());
+            res.ensure_0(aes_set_key(aes.as_mut_ptr(), ConstPtr::new(key)));
+            res.unit_err_with(|| Self::with_aes(aes.assume_init()))
         }
     }
 
@@ -308,6 +294,8 @@ unsafe impl Sync for AesGcm {}
 
 #[cfg(test)]
 mod gcm_test_utils {
+    use alloc::vec;
+    use alloc::vec::Vec;
     use super::*;
     use aes_gcm::aead::Aead;
     use aes_gcm::{Aes256Gcm, Aes128Gcm, AesGcm, KeyInit};
@@ -434,6 +422,7 @@ mod tests {
         let aad = Aad::EMPTY;
 
         let tag = AesGcm::new(&key)
+            .unwrap()
             .encrypt_sized(nonce, input, &mut out_buf, aad).unwrap();
 
         let (o_out, o_tag) = encrypt_rust_crypto(
@@ -470,7 +459,7 @@ mod tests {
         let nonce = Nonce::new([3; 12]);
         let aad = Aad::EMPTY;
 
-        let mut aes = AesGcm::new(&key);
+        let mut aes = AesGcm::new(&key).unwrap();
 
         let tag = aes
             .encrypt_sized(nonce.copy(), plain, &mut out_buf, aad)
@@ -493,7 +482,7 @@ mod tests {
         let nonce = Nonce::new([3; 12]);
         let aad = Aad::EMPTY;
 
-        let mut aes = AesGcm::new(&key);
+        let mut aes = AesGcm::new(&key).unwrap();
 
         let tag = aes
             .encrypt_sized(nonce.copy(), plain, &mut out_buf, aad)
@@ -526,7 +515,7 @@ mod tests {
         let nonce = Iv::new([3; 16]);
         let aad = Aad::EMPTY;
 
-        let mut aes = AesGcm::new(&key);
+        let mut aes = AesGcm::new(&key).unwrap();
 
         let tag = aes
             .encrypt_sized(nonce.copy(), plain, &mut out_buf, aad)
@@ -548,7 +537,7 @@ mod tests {
         ]);
         let nonce = Nonce::new([73, 54, 180, 151, 137, 229, 233, 133, 150, 169, 13, 99]);
         let aad = Aad::EMPTY;
-        let mut aes = AesGcm::new(&key);
+        let mut aes = AesGcm::new(&key).unwrap();
 
         for i in 0..255u8 {
             let input = [i; 1];
@@ -560,8 +549,6 @@ mod tests {
                 .unwrap()
                 .encrypt(nonce.as_slice().try_into().unwrap(), input.as_slice())
                 .unwrap();
-
-            println!("input: {}, output: {}", input[0], out[0]);
 
             // encrypting 1 byte, ignore the tag, ciphertext is always equal to the plaintext.
             assert_eq!(input[0], out[0]);
@@ -597,7 +584,7 @@ mod property_tests {
         ) {
             let mut output = BoundList::<1028>::new_zeroes(input.len());
 
-            let mut aes = AesGcm::new(&key);
+            let mut aes = AesGcm::new(&key).unwrap();
             let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
 
             // 1 byte the probability of a specific key and nonce that retains equivalent plaintext
@@ -626,7 +613,7 @@ mod property_tests {
             let (cipher, tag) = encrypt_rust_crypto(&key, nonce.copy(), input.as_slice());
 
             let mut plain = BoundList::<1028>::new_zeroes(input.len());
-            AesGcm::new(&key)
+            AesGcm::new(&key).unwrap()
                 .decrypt(nonce, cipher.as_slice(), plain.as_mut_slice(), Aad::EMPTY, &tag);
 
             prop_assert_eq!(plain, input);
@@ -640,7 +627,7 @@ mod property_tests {
         ) {
             let mut output = BoundList::<1028>::new_zeroes(input.len());
 
-            let mut aes = AesGcm::new(&key);
+            let mut aes = AesGcm::new(&key).unwrap();
             let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
 
             // 1 byte the probability of a specific key and nonce that retains equivalent plaintext
@@ -673,7 +660,7 @@ mod proofs {
         let key: Key = kani::any();
         let nonce: Nonce = kani::any();
 
-        let mut aes = AesGcm::new(&key);
+        let mut aes = AesGcm::new(&key).unwrap();
         let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
 
         assert_ne!(input, output);

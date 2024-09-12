@@ -27,9 +27,9 @@ use wolf_crypto_sys::{
     INVALID_DEVID, AES_ENCRYPTION, AES_DECRYPTION,
 };
 
-use crate::ptr::MutPtr;
 use zeroize::Zeroize;
-use core::ffi::c_int;
+use core::mem::MaybeUninit;
+use crate::opaque_res::Res;
 
 #[cfg_attr(test, derive(Debug, Clone, PartialEq))]
 pub enum Key {
@@ -114,18 +114,9 @@ impl AesM {
     }
 }
 
-#[inline(always)]
-#[cfg_attr(debug_assertions, must_use)]
-pub(crate) unsafe fn init_aes_unchecked(aes: MutPtr<AesLL>) -> c_int {
-    wc_AesInit(aes.get(), core::ptr::null_mut(), INVALID_DEVID)
-}
-
-#[inline]
-pub(crate) unsafe fn init_aes(aes: MutPtr<AesLL>) {
-    #[cfg(debug_assertions)] {
-        assert_eq!(init_aes_unchecked(aes), 0);
-    }
-    #[cfg(not(debug_assertions))] {
-        init_aes_unchecked(aes);
-    }
+#[cfg_attr(not(debug_assertions), inline(always))]
+pub(crate) unsafe fn init_aes(mut aes: MaybeUninit<AesLL>) -> (MaybeUninit<AesLL>, Res) {
+    let mut res = Res::new();
+    res.ensure_0(wc_AesInit(aes.as_mut_ptr(), core::ptr::null_mut(), INVALID_DEVID));
+    (aes, res)
 }

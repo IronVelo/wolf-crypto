@@ -1,18 +1,19 @@
 use core::ptr::{addr_of_mut};
 use wolf_crypto_sys::{Aes as AesLL, wc_AesCtrEncrypt, wc_AesSetKey, wc_AesFree};
 use crate::aes::{Key, init_aes, AesM};
-use crate::ptr::{MutPtr, ConstPtr};
+use crate::ptr::{ConstPtr};
 use core::ffi::c_int;
 use crate::buf::Iv;
 use crate::opaque_res::Res;
+use core::mem::MaybeUninit;
 
-#[cfg_attr(debug_assertions, must_use)]
+#[must_use]
 #[cfg_attr(not(debug_assertions), inline(always))]
-pub(crate) unsafe fn init_aes_ctr_unchecked(
-    aes: MutPtr<AesLL>, key: ConstPtr<Key>, iv: ConstPtr<Iv>, mode: AesM
+pub(crate) unsafe fn init_aes_ctr(
+    aes: *mut AesLL, key: ConstPtr<Key>, iv: ConstPtr<Iv>, mode: AesM
 ) -> c_int {
     wc_AesSetKey(
-        aes.get(),
+        aes,
         key.as_slice().as_ptr(),
         key.capacity() as u32,
         iv.slice().as_ptr(),
@@ -20,30 +21,21 @@ pub(crate) unsafe fn init_aes_ctr_unchecked(
     )
 }
 
-#[inline]
-pub(crate) unsafe fn init_aes_ctr(
-    aes: MutPtr<AesLL>, key: ConstPtr<Key>, iv: ConstPtr<Iv>, mode: AesM
-) {
-    #[cfg(debug_assertions)] {
-        assert_eq!(init_aes_ctr_unchecked(aes, key, iv, mode), 0);
-    }
-    #[cfg(not(debug_assertions))] {
-        init_aes_ctr_unchecked(aes, key, iv, mode);
-    }
-}
-
-#[inline]
 #[must_use]
+#[inline]
 pub(crate) unsafe fn create_aes_ctr(
     key: ConstPtr<Key>, iv: ConstPtr<Iv>, mode: AesM
-) -> AesLL {
-    let mut aes: AesLL = core::mem::zeroed();
-    let aes_ptr = MutPtr::new(addr_of_mut!(aes));
+) -> (MaybeUninit<AesLL>, Res) {
+    let (mut aes, mut res) = init_aes(MaybeUninit::<AesLL>::uninit());
 
-    init_aes(aes_ptr.copy());
-    init_aes_ctr(aes_ptr, key, iv, mode);
+    // NOTE: It looks as though the `wc_AesSetKey` can handle `wc_AesInit` failing from this
+    // example:
+    // https://www.wolfssl.com/documentation/manuals/wolfssl/group__AES.html#function-wc_aessetkey
+    // This requires testing to back up this assumption.
 
-    aes
+    res.ensure_0(init_aes_ctr(aes.as_mut_ptr(), key, iv, mode));
+
+    (aes, res)
 }
 
 #[inline]
@@ -159,11 +151,14 @@ macro_rules! impl_aes_type {
 
         impl $s_ident {
             $(#[$new_meta])*
-            $new_vis fn new(key: &Key, iv: &Iv) -> Self {
+            $new_vis fn new(key: &Key, iv: &Iv) -> Result<Self, ()> {
                 let key_ptr = ConstPtr::new(key as *const Key);
                 let nonce_ptr = ConstPtr::new(iv as *const Iv);
 
-                Self::with_aes(unsafe { create_aes_ctr(key_ptr, nonce_ptr, AesM::$dir) })
+                unsafe {
+                    let (aes_ll, res) = create_aes_ctr(key_ptr, nonce_ptr, AesM::$dir);
+                    res.unit_err_with(|| Self::with_aes(aes_ll.assume_init()))
+                }
             }
 
             #[inline]
@@ -256,6 +251,7 @@ impl_aes_type! {
         ///
         /// # unsafe {
         /// assert!(AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .apply_keystream_unchecked(input.as_slice(), output.as_mut_slice())
         ///     .is_ok());
         /// # }
@@ -303,6 +299,7 @@ impl_aes_type! {
         /// let mut output = [0u8; 32];
         ///
         /// assert!(AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .apply_keystream_sized(&input, &mut output)
         ///     .is_ok());
         ///
@@ -313,6 +310,7 @@ impl_aes_type! {
         ///
         /// let mut plain = [0u8; 32];
         /// assert!(AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .apply_keystream_sized(&output, &mut plain)
         ///     .is_ok());
         ///
@@ -347,6 +345,7 @@ impl_aes_type! {
         /// let mut output = [0u8; 32];
         ///
         /// assert!(AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .try_apply_keystream(input.as_slice(), output.as_mut_slice())
         ///     .is_ok());
         ///
@@ -357,6 +356,7 @@ impl_aes_type! {
         ///
         /// let mut plain = [0u8; 32];
         /// assert!(AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .try_apply_keystream(output.as_slice(), plain.as_mut_slice())
         ///     .is_ok());
         ///
@@ -391,6 +391,7 @@ impl_aes_type! {
         /// let mut output = [0u8; 32];
         ///
         /// AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .apply_keystream(input.as_slice(), output.as_mut_slice());
         ///
         /// assert_ne!(&input, &output);
@@ -400,6 +401,7 @@ impl_aes_type! {
         ///
         /// let mut plain = [0u8; 32];
         /// AesCtr::new(&key, &iv)
+        ///     .unwrap()
         ///     .apply_keystream(output.as_slice(), plain.as_mut_slice());
         ///
         /// assert_eq!(&plain, &input);
@@ -432,7 +434,7 @@ mod tests {
         let key = Key::Aes256([7; 32]);
         let nonce = [0u8; 16].into();
 
-        let mut ctr = AesCtr::new(&key, &nonce);
+        let mut ctr = AesCtr::new(&key, &nonce).unwrap();
 
         let input = [0u8; 12];
         let mut output = [0u8; 12];
@@ -449,7 +451,7 @@ mod tests {
     fn against_ctr_rust_crypto_smoke() {
         let key = Key::Aes256([7; 32]);
         let nonce = [3; 16].into();
-        let mut ctr = AesCtr::new(&key, &nonce);
+        let mut ctr = AesCtr::new(&key, &nonce).unwrap();
 
         let mut rc_ctr = Ctr128BE::<Aes256>::new_from_slices(
             key.as_slice(), nonce.slice()
@@ -470,7 +472,7 @@ mod tests {
         let key = Key::Aes256([7; 32]);
         let nonce = [1u8; 16].into();
 
-        let mut ctr = AesCtr::new(&key, &nonce);
+        let mut ctr = AesCtr::new(&key, &nonce).unwrap();
 
         let input = [1u8; 12];
         let mut output = [0u8; 12];
@@ -478,7 +480,7 @@ mod tests {
         assert!(ctr.apply_keystream_sized(&input, &mut output).is_ok());
         assert_ne!(output, input);
 
-        let mut decrypt_ctr = AesCtr::new(&key, &nonce);
+        let mut decrypt_ctr = AesCtr::new(&key, &nonce).unwrap();
 
         let mut plain = [0u8; 12];
         assert!(decrypt_ctr.apply_keystream_sized(&output, &mut plain).is_ok());
@@ -494,7 +496,7 @@ mod tests {
         let key = Key::Aes256([7; 32]);
         let nonce = [1u8; 16].into();
 
-        let res = AesCtr::new(&key, &nonce)
+        let res = AesCtr::new(&key, &nonce).unwrap()
             .try_apply_keystream(input.as_slice(), output.as_mut_slice());
 
         assert!(res.is_err());
@@ -550,6 +552,7 @@ mod property_tests {
             let mut output = input.create_self();
 
             let res = AesCtr::new(&key, &nonce)
+                .unwrap()
                 .try_apply_keystream(input.as_slice(), output.as_mut_slice());
 
             prop_assert!(res.is_ok());
@@ -560,6 +563,7 @@ mod property_tests {
 
             let mut plain = input.create_self();
             let res = AesCtr::new(&key, &nonce)
+                .unwrap()
                 .try_apply_keystream(output.as_slice(), plain.as_mut_slice());
 
             prop_assert!(res.is_ok());
@@ -573,7 +577,7 @@ mod property_tests {
             key in any::<Key>(),
             nonce in any::<Iv>()
         ) {
-            let mut ctr = AesCtr::new(&key, &nonce);
+            let mut ctr = AesCtr::new(&key, &nonce).unwrap();
             let mut c_in = input;
 
             with_rust_crypto_ctr!(key, nonce, |o_ctr| {
@@ -592,7 +596,7 @@ mod property_tests {
             key in any::<Key>(),
             nonce in any::<Iv>()
         ) {
-            let mut ctr = AesCtr::new(&key, &nonce);
+            let mut ctr = AesCtr::new(&key, &nonce).unwrap();
             let mut cipher = input.create_self();
 
             ctr.apply_keystream(input.as_slice(), cipher.as_mut_slice());
@@ -618,7 +622,7 @@ mod property_tests {
             key in any::<Key>(),
             nonce in any::<Iv>(),
         ) {
-            let mut ctr = AesCtr::new(&key, &nonce);
+            let mut ctr = AesCtr::new(&key, &nonce).unwrap();
 
             with_rust_crypto_ctr!(key, nonce, |o_ctr| {
                 for _ in 0..256 {
