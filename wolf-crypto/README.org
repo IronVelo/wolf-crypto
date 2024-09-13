@@ -21,7 +21,7 @@ work in security).
 
 *** Roadmap [0/5]
 
-- [-] Hashing [3/6]
+- [-] Hashing [4/6]
   - [X] =SHA2= [6/6]
     - [X] =SHA-224=
     - [X] =SHA-256=
@@ -29,14 +29,14 @@ work in security).
     - [X] =SHA-512=
     - [X] =SHA-512/224=
     - [X] =SHA-512/256=
-  - [-] =SHA3= [4/5]
+  - [X] =SHA3= [5/5]
     - [X] =SHA3-224=
     - [X] =SHA3-256=
     - [X] =SHA3-384=
     - [X] =SHA3-512=
-    - [ ] =SHAKE= [0/2]
-      - [ ] =SHAKE128=
-      - [ ] =SHAKE256=
+    - [X] =SHAKE= [2/2]
+      - [X] =SHAKE128=
+      - [X] =SHAKE256=
   - [ ] =SHA=
   - [X] =RIPEMD-160=
   - [X] =MD= [2/2]

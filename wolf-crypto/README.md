@@ -1,16 +1,16 @@
 
 # Table of Contents
 
-1.  [`wolf-crypto`](#orgaf5067c)
-2.  [Current Priority and Roadmap](#org70a7312)
-    1.  [Roadmap <code>[0/5]</code>](#org6609680)
-3.  [License](#org2485180)
-4.  [Notes](#orgcaebf73)
+1.  [`wolf-crypto`](#orgc1726b3)
+2.  [Current Priority and Roadmap](#org65641a6)
+    1.  [Roadmap <code>[0/5]</code>](#orgcd81498)
+3.  [License](#org7ff2650)
+4.  [Notes](#org33425a0)
 
 **WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.**
 
 
-<a id="orgaf5067c"></a>
+<a id="orgc1726b3"></a>
 
 # `wolf-crypto`
 
@@ -25,7 +25,7 @@ I personally would not be comfortable using anything in a general purpose applic
 work in security).
 
 
-<a id="org70a7312"></a>
+<a id="org65641a6"></a>
 
 # Current Priority and Roadmap
 
@@ -35,11 +35,11 @@ work in security).
 -   Enable `FIPS-MODE` support in `wolf-crypto-sys` to align with the FIPS compliance goals.
 
 
-<a id="org6609680"></a>
+<a id="orgcd81498"></a>
 
 ## Roadmap <code>[0/5]</code>
 
--   [-] Hashing <code>[3/6]</code>
+-   [-] Hashing <code>[4/6]</code>
     -   [X] `SHA2` <code>[6/6]</code>
         -   [X] `SHA-224`
         -   [X] `SHA-256`
@@ -47,14 +47,14 @@ work in security).
         -   [X] `SHA-512`
         -   [X] `SHA-512/224`
         -   [X] `SHA-512/256`
-    -   [-] `SHA3` <code>[4/5]</code>
+    -   [X] `SHA3` <code>[5/5]</code>
         -   [X] `SHA3-224`
         -   [X] `SHA3-256`
         -   [X] `SHA3-384`
         -   [X] `SHA3-512`
-        -   [ ] `SHAKE` <code>[0/2]</code>
-            -   [ ] `SHAKE128`
-            -   [ ] `SHAKE256`
+        -   [X] `SHAKE` <code>[2/2]</code>
+            -   [X] `SHAKE128`
+            -   [X] `SHAKE256`
     -   [ ] `SHA`
     -   [X] `RIPEMD-160`
     -   [X] `MD` <code>[2/2]</code>
@@ -124,14 +124,14 @@ work in security).
 -   [ ] Writing the Asymmetric Encryption Section
 
 
-<a id="org2485180"></a>
+<a id="org7ff2650"></a>
 
 # License
 
 This library is under GPLv2 licensing **unless** you purchased a commercial license from wolfSSL.
 
 
-<a id="orgcaebf73"></a>
+<a id="org33425a0"></a>
 
 # Notes
 
