@@ -1,11 +1,5 @@
 
 /// Create an API for a hashing function
-///
-/// # NOTE
-///
-/// IF FREE IS NOT PROVIDED, IT IS ASSUMED THAT THE FINALIZE FUNCTION DOES NOT RESET THE STATE. TO
-/// KEEP THE API CONSISTENT AND CORRECT, THIS MACRO WILL RESET THE STATE MANUALLY UNDER THESE
-/// CIRCUMSTANCES.
 macro_rules! make_api {
     (
         $(sec_warning: $warning:literal,)?
@@ -921,16 +915,3 @@ macro_rules! make_api {
     };
 }
 
-/*macro_rules! dyn_out {
-    (
-    name: $name:ident,
-    wc: $wc:ty,
-    $(max-bs: $bs:literal,)?
-    init: $init:ident $(, heap: $heap:expr, devid: $devId:expr)?,
-    update: $update:ident,
-    finalize: $finalize:ident
-    $(, free: $free:ident)?
-    ) => {
-
-    }
-}*/

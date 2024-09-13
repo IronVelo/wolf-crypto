@@ -22,7 +22,13 @@ pub mod sha3_256;
 pub mod sha3_384;
 #[doc(hidden)]
 pub mod sha3_512;
-// mod shake128;
+
+#[macro_use]
+mod shake_api;
+#[doc(hidden)]
+pub mod shake128;
+#[doc(hidden)]
+pub mod shake256;
 
 pub use {
     sha224::Sha224,
@@ -34,7 +40,9 @@ pub use {
     sha3_224::Sha3_224,
     sha3_256::Sha3_256,
     sha3_384::Sha3_384,
-    sha3_512::Sha3_512
+    sha3_512::Sha3_512,
+    shake128::Shake128,
+    shake256::Shake256
 };
 
 non_fips! {
