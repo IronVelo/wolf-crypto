@@ -30,7 +30,7 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
 
 * TODO Roadmap [0/5]
 
-** TODO Hashing [4/6]
+** TODO Hashing [5/6]
 *** DONE SHA2 [6/6]
 **** DONE SHA-224
 **** DONE SHA-256
@@ -46,7 +46,7 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
 **** DONE SHAKE [2/2]
 ***** DONE SHAKE128
 ***** DONE SHAKE256
-*** TODO SHA [0/1]
+*** DONE SHA [1/1]
 *** DONE RIPEMD-160 [1/1]
 *** DONE MD [2/2]
 **** DONE MD5
