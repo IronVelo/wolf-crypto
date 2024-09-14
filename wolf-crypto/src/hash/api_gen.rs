@@ -1,8 +1,259 @@
 
+macro_rules! copy_impl {
+    (
+        name: $name:ident,
+        wc: $wc:ty,
+        copy: $copy:ident,
+        finalize_func: $ff:ident
+        $(,)?
+    ) => {
+        impl Clone for $name {
+            #[doc = concat!(
+                "Copy the state of the hash (calls the `", stringify!($copy), "` function)"
+            )]
+            #[doc = ""]
+            #[doc = "# Returns"]
+            #[doc = ""]
+            #[doc = concat!(
+                "A distinct new instance of `", stringify!($name), "`, with the same state as the ",
+                "hasher that was cloned."
+            )]
+            #[doc = ""]
+            #[doc = "# Example"]
+            #[doc = ""]
+            #[doc = "```"]
+            #[doc = concat!("use wolf_crypto::hash::", stringify!($name), ";")]
+            #[doc = concat!("let mut hasher = ", stringify!($name), "::new().unwrap();")]
+            #[doc = ""]
+            #[doc = "assert!(hasher.update_sized(b\"hello world\").is_ok());"]
+            #[doc = ""]
+            #[doc = "let mut cloned = hasher.clone();"]
+            #[doc = "assert_eq!("]
+            #[doc = concat!("    cloned.", stringify!($ff), "().unwrap(),")]
+            #[doc = concat!("    hasher.", stringify!($ff), "().unwrap(),")]
+            #[doc = "    \"The two hashers should have the same output\""]
+            #[doc = ");"]
+            #[doc = "```"]
+            fn clone(&self) -> Self {
+                // Fairly opaque in docs for return type of the copy function. Here's the
+                // source, and the only place in which this returns a non-zero status.
+
+                // static int wc_Sha3Copy(wc_Sha3* src, wc_Sha3* dst)
+                // {
+                //     int ret = 0;
+                //
+                //     if (src == NULL || dst == NULL)
+                //         return BAD_FUNC_ARG;
+                //
+                //     XMEMCPY(dst, src, sizeof(wc_Sha3));
+                //     /* ... */
+                //     return ret;
+                // }
+
+                // This is the same general implementation for all of the Copy implementations, see:
+                // -- https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha256.c#L2527
+                // -- https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha.c#L1117
+                // -- https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha512.c#L1870
+                // -- https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/md5.c#L541
+
+                // So, the only way that this fails is if src is null or dst is null. This is
+                // significant as it plays into deciding if this needs to be feature gated by
+                // `panic_api`.
+
+                // So, we know src is non-null, and we know the dst is non-null. This is due to
+                // rust's memory safety guarantees. For as long as our $name instance is scope,
+                // the associated memory is not prematurely freed. So, this should be infallible,
+                // and thus fine to include in the API without the feature gate.
+
+                // ---------------------- Non-const pointer considerations ---------------------
+                // Another dangerous part of this API is that the pointer for src is not declared
+                // as const. This could have been simply been due to a slight oversight or
+                // with the goal consistency, perhaps even future proofing to ensure if they do
+                // eventually mutate it (which would not make much sense in a copy impl) they do
+                // not violate semantic versioning.
+                //
+                // I have reviewed all Copy implementations, including all possible paths (even
+                // those not included with the current wolf-crypto-sys build). There is absolutely
+                // no mutation of the source pointer. This is in our update checklist, whenever
+                // we update wolfcrypt this assumption is audited as a pre-requisite for release.
+                //
+                // The update checklist is at the root of this repository under the name:
+                //   wolfcrypt-update-checklist.org
+
+                let mut inner = ::core::mem::MaybeUninit::<$wc>::uninit();
+
+                // we assert that the result is zero, just to validate our previous claims
+                // in testing (even though most measures applied, ASAN, etc, would catch this).
+
+                unsafe {
+                    // See above commentary as to why this is infallible.
+                    assert_eq!(
+                        $copy(
+                            // See above commentary as to why this is safe.
+                            ::core::ptr::addr_of!(self.inner) as *mut $wc,
+                            inner.as_mut_ptr()
+                        ),
+                        0,
+                        concat!(
+                            "Assumption not met, this is a bug, please report this as soon as ",
+                            "possible. The `", stringify!($copy), "` function should have been ",
+                            "infallible under all possible circumstances. But, it has just failed. ",
+                            "This error arises from the `", stringify!($name), "::clone` ",
+                            "implementation."
+                        )
+                    );
+
+                    // See above commentary as to why the $copy operation is infallible, thus
+                    // implying `inner` must be initialized at this point.
+                    Self { inner: inner.assume_init() }
+                }
+            }
+        }
+
+        #[cfg(test)]
+        mod copy_tests {
+            use super::*;
+            use std::thread;
+
+            #[test]
+            fn copied_finalize_equivalent_to_src() {
+                let mut hasher = $name::new().unwrap();
+
+                let input = b"hello world";
+
+                assert!(hasher.try_update(input.as_slice()).is_ok());
+
+                let mut c_hasher = hasher.clone();
+
+                let out = hasher.$ff().unwrap();
+                let c_out = c_hasher.$ff().unwrap();
+
+                assert_eq!(out, c_out);
+            }
+
+            #[test]
+            fn multiple_copies_equivalent_finalize() {
+                let mut hasher = $name::new().unwrap();
+                assert!(hasher.try_update(b"hello world").is_ok());
+
+                let hashers: Vec<$name> = (0..10).map(|_| hasher.clone()).collect();
+                let reference = hasher.$ff().unwrap();
+
+                for mut h in hashers.into_iter() {
+                    assert_eq!(h.$ff().unwrap(), reference);
+                }
+            }
+
+            #[test]
+            fn cross_thread_boundary() {
+                let mut hasher = $name::new().unwrap();
+                assert!(hasher.try_update(b"hello").is_ok());
+
+                let cloned = hasher.clone();
+                let handle = thread::spawn(move || {
+                    let mut threaded_hasher = cloned;
+                    assert!(threaded_hasher.try_update(b" world").is_ok());
+                    threaded_hasher.$ff().unwrap()
+                });
+
+                assert!(hasher.try_update(b" world").is_ok());
+                let original_result = hasher.$ff().unwrap();
+                let threaded_result = handle.join().unwrap();
+
+                assert_eq!(
+                    original_result,
+                    threaded_result,
+                    "Hash results should be the same across threads"
+                );
+            }
+
+            #[test]
+            fn deep_clone_with_multiple_updates() {
+                let mut original = $name::new().unwrap();
+                assert!(original.try_update(b"hello").is_ok());
+
+                let mut cloned = original.clone();
+
+                assert!(original.try_update(b" world").is_ok());
+                assert!(cloned.try_update(b" universe").is_ok());
+
+                let original_result = original.$ff().unwrap();
+                let cloned_result = cloned.$ff().unwrap();
+
+                assert_ne!(
+                    original_result, cloned_result,
+                    "Cloned hasher should have independent state"
+                );
+            }
+
+            #[test]
+            fn partial_update_clone() {
+                let mut original = $name::new().unwrap();
+                assert!(original.try_update(b"hel").is_ok());
+
+                let mut cloned = original.clone();
+
+                assert!(original.try_update(b"lo world").is_ok());
+                assert!(cloned.try_update(b"lo world").is_ok());
+
+                let original_result = original.$ff().unwrap();
+                let cloned_result = cloned.$ff().unwrap();
+
+                assert_eq!(
+                    original_result,
+                    cloned_result,
+                    "Partial updates should result in the same hash"
+                );
+            }
+
+            #[test]
+            fn clone_after_finalize() {
+                let mut original = $name::new().unwrap();
+                assert!(original.try_update(b"hello world").is_ok());
+
+                let original_result = original.$ff().unwrap();
+
+                // Clone after finalize (which resets the state)
+                let mut cloned = original.clone();
+
+                // The cloned hasher should now be in a fresh state
+                assert!(cloned.try_update(b"new input").is_ok());
+                let cloned_result = cloned.$ff().unwrap();
+
+                assert_ne!(
+                    original_result, cloned_result,
+                    "Cloned hasher after finalize should be in a fresh state"
+                );
+            }
+
+            #[test]
+            fn multiple_clones_and_updates() {
+                let mut original = $name::new().unwrap();
+                assert!(original.try_update(b"start").is_ok());
+
+                let mut clone1 = original.clone();
+                let mut clone2 = original.clone();
+
+                assert!(original.try_update(b" original").is_ok());
+                assert!(clone1.try_update(b" clone1").is_ok());
+                assert!(clone2.try_update(b" clone2").is_ok());
+
+                let original_result = original.$ff().unwrap();
+                let clone1_result = clone1.$ff().unwrap();
+                let clone2_result = clone2.$ff().unwrap();
+
+                assert_ne!(original_result, clone1_result);
+                assert_ne!(original_result, clone2_result);
+                assert_ne!(clone1_result, clone2_result);
+            }
+        }
+    };
+}
+
 /// Create an API for a hashing function
 macro_rules! make_api {
     (
-        $(sec_warning: $warning:literal,)?
+        $(sec_warning: $($warning:literal),*,)?
         $(anecdote: $anecdote:literal,)?
         name: $name:ident,
         wc: $wc:ty,
@@ -11,14 +262,17 @@ macro_rules! make_api {
         update: $(= $u_void:ident)? $update:ident,
         finalize: $(= $f_void:ident)? $finalize:ident
         $(, free: $free:ident)?
-        $(, needs-reset: $nr:ident)? $(,)?
+        $(, needs-reset: $nr:ident)?
+        $(, copy: $copy:ident)? $(,)?
     ) => {
         #[doc = concat!("The `", stringify!($name), $($anecdote, )? "` hasher.")]
         #[doc = ""]
         $(
             #[doc = "# Security Warning"]
             #[doc = ""]
-            #[doc = $warning]
+            $(
+                #[doc = $warning]
+            )*
             #[doc = ""]
         )?
         #[doc = "# Example"]
@@ -45,7 +299,9 @@ macro_rules! make_api {
             $(
                 #[doc = "# Security Warning"]
                 #[doc = ""]
-                #[doc = $warning]
+                $(
+                    #[doc = $warning]
+                )*
                 #[doc = ""]
             )?
             #[doc = concat!("Create a new `", stringify!($name), "` instance.")]
@@ -565,6 +821,13 @@ macro_rules! make_api {
         }
         )?
 
+        $(copy_impl! {
+            name: $name,
+            wc: $wc,
+            copy: $copy,
+            finalize_func: try_finalize
+        })?
+
         #[cfg(test)]
         mod unit_tests {
             use super::*;
@@ -909,6 +1172,9 @@ macro_rules! make_api {
     };
     (@rc RipeMd) => {
         ripemd::Ripemd160
+    };
+    (@rc Sha) => {
+        sha1::Sha1
     };
     (@rc $name:ident) => {
         sha2::$name
