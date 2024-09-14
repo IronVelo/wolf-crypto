@@ -6,8 +6,8 @@ macro_rules! shake_api {
         init: $init:ident, heap: $heap:expr, devid: $devId:expr,
         update: $update:ident,
         finalize: $finalize:ident,
-        free: $free:ident
-        $(,)?
+        free: $free:ident,
+        copy: $copy:ident $(,)?
     ) => {
         #[doc = concat!("The `", stringify!($name), "` hasher.")]
         #[doc = ""]
@@ -499,6 +499,13 @@ macro_rules! shake_api {
             fn drop(&mut self) {
                 unsafe { $free(::core::ptr::addr_of_mut!(self.inner)) }
             }
+        }
+
+        copy_impl! {
+            name: $name,
+            wc: $wc,
+            copy: $copy,
+            finalize_func: finalize_default
         }
 
         #[cfg(test)]
