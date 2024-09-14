@@ -1,7 +1,7 @@
 use wolf_crypto_sys::{
     wc_Shake,
     wc_Shake128_Update, wc_Shake128_Final,
-    wc_InitShake128, wc_Shake128_Free,
+    wc_InitShake128, wc_Shake128_Free, wc_Shake128_Copy
 };
 
 shake_api! {
@@ -11,5 +11,6 @@ shake_api! {
     init: wc_InitShake128, heap: core::ptr::null_mut(), devid: wolf_crypto_sys::INVALID_DEVID,
     update: wc_Shake128_Update,
     finalize: wc_Shake128_Final,
-    free: wc_Shake128_Free
+    free: wc_Shake128_Free,
+    copy: wc_Shake128_Copy
 }
