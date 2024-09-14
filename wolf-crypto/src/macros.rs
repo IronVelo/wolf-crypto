@@ -6,3 +6,12 @@ macro_rules! non_fips {
         )*
     };
 }
+
+macro_rules! hidden {
+    ($($item:item)*) => {
+        $(
+            #[doc(hidden)]
+            $item
+        )*
+    };
+}
