@@ -1,7 +1,7 @@
 use wolf_crypto_sys::{
     RipeMd as wc_RipeMd,
     wc_RipeMdUpdate, wc_RipeMdFinal,
-    wc_InitRipeMd
+    wc_InitRipeMd,
 };
 
 make_api! {

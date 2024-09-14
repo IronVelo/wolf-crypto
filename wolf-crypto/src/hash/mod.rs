@@ -2,33 +2,27 @@
 
 #[macro_use]
 mod api_gen;
-#[doc(hidden)]
-pub mod sha224;
-#[doc(hidden)]
-pub mod sha256;
-#[doc(hidden)]
-pub mod sha384;
-#[doc(hidden)]
-pub mod sha512;
-#[doc(hidden)]
-pub mod sha512_256;
-#[doc(hidden)]
-pub mod sha512_224;
-#[doc(hidden)]
-pub mod sha3_224;
-#[doc(hidden)]
-pub mod sha3_256;
-#[doc(hidden)]
-pub mod sha3_384;
-#[doc(hidden)]
-pub mod sha3_512;
+
+hidden! {
+    pub mod sha224;
+    pub mod sha256;
+    pub mod sha384;
+    pub mod sha512;
+    pub mod sha512_256;
+    pub mod sha512_224;
+    pub mod sha3_224;
+    pub mod sha3_256;
+    pub mod sha3_384;
+    pub mod sha3_512;
+}
 
 #[macro_use]
 mod shake_api;
-#[doc(hidden)]
-pub mod shake128;
-#[doc(hidden)]
-pub mod shake256;
+
+hidden! {
+    pub mod shake128;
+    pub mod shake256;
+}
 
 pub use {
     sha224::Sha224,
@@ -61,4 +55,8 @@ non_fips! {
     #[doc(hidden)]
     pub mod blake2b;
     pub use blake2b::Blake2b;
+
+    #[doc(hidden)]
+    pub mod sha;
+    pub use sha::Sha;
 }
