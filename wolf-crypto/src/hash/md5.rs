@@ -1,7 +1,8 @@
 use wolf_crypto_sys::{
     wc_Md5,
     wc_Md5Update, wc_Md5Final,
-    wc_InitMd5, wc_Md5Free
+    wc_InitMd5, wc_Md5Free,
+    wc_Md5Copy
 };
 
 make_api! {
@@ -14,5 +15,6 @@ make_api! {
     init: wc_InitMd5,
     update: wc_Md5Update,
     finalize: wc_Md5Final,
-    free: wc_Md5Free
+    free: wc_Md5Free,
+    copy: wc_Md5Copy
 }
