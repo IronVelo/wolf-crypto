@@ -36,7 +36,6 @@ use crate::{const_lte, const_can_cast_u32, can_cast_u32, gte, const_gte, lte};
 /// assert!(hasher.try_update(input.as_slice()).is_ok());
 ///
 /// let finalized = hasher.try_finalize().unwrap();
-/// assert_ne!(finalized, input);
 /// assert_eq!(finalized.len(), 64);
 /// ```
 ///
@@ -289,7 +288,7 @@ impl<const C: usize> Blake2b<C> {
     ///
     /// let mut hasher = Blake2b::<64>::new().unwrap();
     ///
-    /// let input = [b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd'];
+    /// let input = b"hello world";
     /// assert!(hasher.update_sized(&input).is_ok());
     ///
     /// let finalized = hasher.try_finalize().unwrap();
@@ -531,3 +530,171 @@ impl<const C: usize> Blake2b<C> {
     }
 }
 
+#[cfg(test)]
+macro_rules! with_many_sizes {
+    (
+        |mut $wolf:ident, mut $rc:ident $(, $sz:ident)?| $do:expr
+    ) => {{
+        // 512 bit
+        with_many_sizes! { |mut $wolf is 64, mut $rc is U64 $(, $sz)?| $do }
+        // 384 bit
+        with_many_sizes! { |mut $wolf is 48, mut $rc is U48 $(, $sz)?| $do }
+        // 256 bit
+        with_many_sizes! { |mut $wolf is 32, mut $rc is U32 $(, $sz)?| $do }
+        // 224 bit
+        with_many_sizes! { |mut $wolf is 28, mut $rc is U28 $(, $sz)?| $do }
+        // 192 bit
+        with_many_sizes! { |mut $wolf is 24, mut $rc is U24 $(, $sz)?| $do }
+        // 176 bit
+        with_many_sizes! { |mut $wolf is 22, mut $rc is U22 $(, $sz)?| $do }
+        // 160 bit
+        with_many_sizes! { |mut $wolf is 20, mut $rc is U20 $(, $sz)?| $do }
+        // 112 bit
+        with_many_sizes! { |mut $wolf is 14, mut $rc is U14 $(, $sz)?| $do }
+        // 96 bit
+        with_many_sizes! { |mut $wolf is 12, mut $rc is U12 $(, $sz)?| $do }
+        // 72 bit
+        with_many_sizes! { |mut $wolf is 9, mut $rc is U9 $(, $sz)?| $do }
+        // 64 bit
+        with_many_sizes! { |mut $wolf is 8, mut $rc is U8 $(, $sz)?| $do }
+        // 48 bit
+        with_many_sizes! { |mut $wolf is 6, mut $rc is U6 $(, $sz)?| $do }
+        // 32 bit
+        with_many_sizes! { |mut $wolf is 4, mut $rc is U4 $(, $sz)?| $do }
+        // 16 bit
+        with_many_sizes! { |mut $wolf is 2, mut $rc is U2 $(, $sz)?| $do }
+        // 8 bit
+        with_many_sizes! { |mut $wolf is 1, mut $rc is U1 $(, $sz)?| $do }
+    }};
+    (
+        |mut $wolf:ident is $sz:literal, mut $rc:ident is $rSz:ident $(, $gS:ident)?|
+        $do:expr
+    ) => {{
+        $(let $gS = $sz;)?
+        let mut $wolf = Blake2b::<{ $sz }>::new().unwrap();
+        let mut $rc   = blake2::Blake2b::<::digest::consts::$rSz>::new();
+        $do
+    }}
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use digest::Digest;
+
+    #[test]
+    fn rust_crypto_equivalence() {
+        with_many_sizes!(|mut wolf, mut rc| {
+            let input = b"hello world";
+
+            assert!(wolf.try_update(input.as_slice()).is_ok());
+            rc.update(input.as_slice());
+
+            let w_out  = wolf.try_finalize().unwrap();
+            let rc_out = rc.finalize();
+
+            assert_eq!(w_out.as_slice(), rc_out.as_slice());
+        });
+    }
+
+    #[test]
+    fn rust_crypto_partial_update_equivalence() {
+        with_many_sizes!(|mut wolf, mut rc| {
+            let input = b"hello w";
+
+            assert!(wolf.try_update(input.as_slice()).is_ok());
+            rc.update(input.as_slice());
+
+            let f = b"orld";
+
+            wolf.update(f.as_slice());
+            rc.update(f.as_slice());
+
+            let w_out  = wolf.try_finalize().unwrap();
+            let rc_out = rc.finalize();
+
+            assert_eq!(w_out.as_slice(), rc_out.as_slice());
+        });
+    }
+
+    #[test]
+    fn rust_crypto_empty_equivalence() {
+        with_many_sizes!(|mut wolf, mut rc| {
+            let input = b"";
+
+            assert!(wolf.try_update(input.as_slice()).is_ok());
+            rc.update(input.as_slice());
+
+            let w_out  = wolf.try_finalize().unwrap();
+            let rc_out = rc.finalize();
+
+            assert_eq!(w_out.as_slice(), rc_out.as_slice());
+        })
+    }
+
+    #[test]
+    fn rust_crypto_1mb_equivalence() {
+        let input = vec![7u8; 1_000_000];
+
+        with_many_sizes!(|mut wolf, mut rc| {
+            assert!(wolf.try_update(input.as_slice()).is_ok());
+            rc.update(input.as_slice());
+
+            let w_out  = wolf.try_finalize().unwrap();
+            let rc_out = rc.finalize();
+
+            assert_eq!(w_out.as_slice(), rc_out.as_slice());
+        })
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use digest::Digest;
+
+    use crate::aes::test_utils::{BoundList, AnyList};
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(15_000))]
+
+        #[test]
+        fn rust_crypto_eq_wolf_single_update(
+            input in any::<BoundList<1024>>()
+        ) {
+            with_many_sizes!(|mut wolf, mut rc| {
+                prop_assert!(wolf.try_update(input.as_slice()).is_ok());
+                rc.update(input.as_slice());
+
+                let finalized = wolf.try_finalize().unwrap();
+                let rc_finalized = rc.finalize();
+
+                prop_assert_eq!(finalized.as_slice(), rc_finalized.as_slice());
+            });
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(5_000))]
+
+        // this takes a while, as testing multiple different digest sizes, iterating over all inputs
+        // updating each.
+        #[test]
+        fn rust_crypto_eq_wolf_arb_updates(
+            inputs in any::<AnyList<32, BoundList<512>>>()
+        ) {
+            with_many_sizes!(|mut wolf, mut rc| {
+                for input in inputs.as_slice().iter() {
+                    prop_assert!(wolf.try_update(input.as_slice()).is_ok());
+                    rc.update(input.as_slice());
+                }
+
+                let finalized = wolf.try_finalize().unwrap();
+                let rc_finalized = rc.finalize();
+
+                prop_assert_eq!(finalized.as_slice(), rc_finalized.as_slice());
+            });
+        }
+    }
+}
