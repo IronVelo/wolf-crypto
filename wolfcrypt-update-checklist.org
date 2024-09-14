@@ -1,0 +1,73 @@
+#+TITLE: Update Checklist for Underlying =wolfcrypt=
+#+OPTIONS: toc:2 num:t author:nil
+
+* Introduction
+
+This document goes over what needs to be ensured prior to updating to a new version
+of =wolfcrypt=. This library makes assumptions based on the current state of =wolfcrypt=,
+these assumptions are made via reviewing the source code of =wolfcrypt=, rather than things
+protected by semantic versioning. Prior to updating the underlying =wolfcrypt= library,
+these assumptions must be audited, ensuring that no changes in =wolfcrypt= violate them.
+
+This also means, that under =wolfcrypt= updates this library does not necessarily follow
+the same versioning scheme as =wolfcrypt=. While =wolfcrypt= may introduce changes—such as
+mutating a pointer that was previously unmodified—without it being considered a breaking
+change (since the pointer is not declared as =const=), this would have significant consequences
+for our API. Specifically, in our Rust API, we rely on the assumption that certain functions,
+such as those related to cryptographic hashing, do not mutate their =src= pointer, even though
+=wolfcrypt= does not enforce this immutability at the API level.
+
+For instance, we implement =Clone= for certain cryptographic hashers by internally calling
+=wolfcrypt='s =Copy= functions, which take a mutable pointer but do not currently mutate
+the =src= data. If =wolfcrypt= were to start mutating the =src= pointer in these functions,
+it would force a breaking change in our Rust API, as we would have to remove the =Clone=
+implementation or move it to a method that takes a mutable reference. Therefore, what may be a
+non-breaking change for =wolfcrypt= could be a breaking change for us, and we must audit each
+new version of =wolfcrypt= carefully to ensure our assumptions still hold.
+
+In short, a =patch= version update in =wolfcrypt= could result in a =minor= or even =major=
+version update for our Rust API, depending on whether it impacts these assumptions.
+
+The assumptions we make are not very out there, they undergo ridicule, and include arguments
+for why they are valid.
+
+* Checklist
+
+Right now, since we make minimal assumptions, there is only one thing to ensure on each update.
+If we are forced to continue making assumptions this list will expand. On every update of
+=wolfcrypt= we will need to check every item of this checklist prior to updating our Rust API.
+
+- Ensure that =wolfcrypt='s =Copy= functions for hashing algorithms do not mutate the =src=
+  pointer. The =Copy= functions' =src= pointer is not declared as =const=, therefore they can
+  begin mutating the =src= pointer (unlikely) without introducing any breaking changes.
+
+  We will need to check all places in which we depend on this current state remaining true,
+  these are:
+
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha256.c#L2527][sha256]]
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha256.c#L2391][sha224]]
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha512.c#L2155][sha384]]
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha512.c#L1870][sha512]]
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha3.c#L974][sha3 family (including SHAKE)]]
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/sha.c#L1117][sha1]]
+  - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/md5.c#L541][MD5 (MD4 etc does not have a Copy impl)]]
+
+  Blake2 does not include a Copy impl.
+
+* Current wolfcrypt Version
+
+- Last verified against: =5.7.2=
+- Date of last verification: 2024-09-14
+
+* Additional Steps
+
+** Review wolfcrypt Changelog
+- [ ] Review the changelog for any significant changes not covered by our specific assumptions
+
+** Run Test Suite
+- [ ] After verifying all points and updating wolfcrypt, run the full test suite of our Rust wrapper
+
+* Potential Future Assumptions
+
+- Note any areas of wolfcrypt's API that we're watching closely, which might need to be added to our
+  checklist in the future.
