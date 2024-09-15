@@ -1,56 +1,130 @@
 //! Convenient Error Handling and Accumulation
-
+//!
+//! This module provides a simple, opaque error type (`Res`) designed to prevent
+//! side-channel attacks through timing or error messages. It allows for
+//! accumulation of error states without revealing specific error details.
 use core::ffi::c_int;
 
+/// An opaque result type for error handling without exposing error details.
+///
+/// This type is designed to prevent side-channel attacks by not revealing
+/// specific error information. It only indicates success or failure.
 #[must_use = "You must handle the potential error"]
 #[repr(transparent)]
 pub struct Res(bool);
 
 impl Res {
+    /// Represents a successful result.
     pub const OK: Res = Res(true);
+    /// Represents an error result.
     pub const ERR: Res = Res(false);
 
+    /// Creates a new `Res` instance initialized to `OK`.
+    ///
+    /// # Returns
+    ///
+    /// A new `Res` instance representing success.
     pub const fn new() -> Self {
         Self::OK
     }
 
+    /// Checks if the result is OK (successful).
+    ///
+    /// # Returns
+    ///
+    /// `true` if the result is OK, `false` otherwise.
     #[inline]
     pub const fn is_ok(&self) -> bool {
         self.0
     }
 
+
+    /// Checks if the result is an error.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the result is an error, `false` otherwise.
     #[inline]
     pub const fn is_err(&self) -> bool {
         !self.0
     }
 
+    /// Updates the result based on a boolean condition.
+    ///
+    /// If `res` is `false`, this method will set the `Res` to an error state.
+    ///
+    /// # Arguments
+    ///
+    /// * `res` - A boolean representing a condition to check.
     #[inline]
     pub fn check(&mut self, res: bool) {
         self.0 &= res;
     }
 
+
+    /// Ensures that a C integer result is equal to 1.
+    ///
+    /// Sets the `Res` to an error state if the input is not 1.
+    ///
+    /// # Arguments
+    ///
+    /// * `res` - A C integer to check.
     #[inline]
     pub fn ensure_1(&mut self, res: c_int) {
         self.0 &= (res as u8) == 1u8;
     }
 
+    /// Ensures that a C integer result is equal to 0.
+    ///
+    /// Sets the `Res` to an error state if the input is not 0.
+    ///
+    /// # Arguments
+    ///
+    /// * `res` - A C integer to check.
     #[inline]
     pub fn ensure_0(&mut self, res: c_int) {
         self.0 &= (res as u8) == 0u8;
     }
 
+    /// Ensures that a C integer result is positive.
+    ///
+    /// Sets the `Res` to an error state if the input is not positive.
+    ///
+    /// # Arguments
+    ///
+    /// * `res` - A C integer to check.
     #[inline]
     pub fn ensure_pos(&mut self, res: c_int) {
         const R_SHR: c_int = (core::mem::size_of::<c_int>() * 8 - 1) as c_int;
         self.0 &= (!(res >> R_SHR) as u8) & 1 == 1;
     }
 
+    /// Combines this `Res` with another `Res`.
+    ///
+    /// The result will be OK only if both `Res` instances are OK.
+    ///
+    /// # Arguments
+    ///
+    /// * `res` - Another `Res` instance to combine with this one.
     #[inline]
     pub fn ensure(&mut self, res: Self) {
         self.0 &= res.0;
     }
 
-    /// Not constant time
+    /// Converts the `Res` into a `Result<OK, ()>`.
+    ///
+    /// # Warning
+    ///
+    /// This method is not constant time and should be used carefully in
+    /// security-sensitive contexts.
+    ///
+    /// # Arguments
+    ///
+    /// * `ok` - The value to return in the `Ok` variant if the `Res` is OK.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(ok)` if the `Res` is OK, `Err(())` otherwise.
     #[inline(always)]
     pub fn unit_err<OK>(self, ok: OK) -> Result<OK, ()> {
         if self.is_ok() {
@@ -60,17 +134,26 @@ impl Res {
         }
     }
 
-    /// Not constant time
+    /// Converts the `Res` into a `Result<OK, ()>`, with a closure for the OK case.
     ///
-    /// ### When to Use
+    /// # Warning
     ///
-    /// [`unit_err`] and `unit_err_with` are very similar in behavior but serve different purpose,
-    /// for example, say the initiation of the `OK` result type depends on the previous result being
-    /// OK for the safety of the program. In this case `unit_err_with` should be used to ensure that
-    /// said unsafe function is only ever invoked if the preconditions to its existence are
-    /// fulfilled.
+    /// This method is not constant time and should be used carefully in
+    /// security-sensitive contexts.
     ///
-    /// [`unit_err`]: Self::unit_err
+    /// # When to Use
+    ///
+    /// Use this method when the creation of the `OK` value depends on the result
+    /// being OK for safety reasons. The closure is only called if the `Res` is OK,
+    /// ensuring that any preconditions for the OK value's creation are met.
+    ///
+    /// # Arguments
+    ///
+    /// * `ok` - A closure that returns the value for the `Ok` variant if the `Res` is OK.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(ok())` if the `Res` is OK, `Err(())` otherwise.
     #[inline(always)]
     pub fn unit_err_with<F, OK>(self, ok: F) -> Result<OK, ()>
         where F: FnOnce() -> OK
@@ -82,6 +165,17 @@ impl Res {
         }
     }
 
+    /// Unwraps the `Res`, panicking if it's an error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `Res` is an error.
+    ///
+    /// # Warning
+    ///
+    /// This method should generally be avoided in production code, as it can lead
+    /// to program termination. It's primarily useful for testing or in situations
+    /// where an error truly represents an unrecoverable state.
     #[inline]
     #[track_caller]
     pub fn unwrap(self) {
