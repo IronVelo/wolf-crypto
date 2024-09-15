@@ -656,6 +656,7 @@ mod tests {
             .unwrap()
     }
 
+    #[allow(dead_code)]
     #[derive(Debug, Clone)]
     enum COut<const S: usize> {
         GcmCrate {
