@@ -28,9 +28,9 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
 - Affiliation: I am not affiliated with wolfSSL, I just enjoy security and have appreciation for their work.
 - Why is this named =wolf-crypto= and not =wolfcrypt=: I did not want to take the official name by wolfSSL.
 
-* TODO Roadmap [0/5]
+* TODO Roadmap [1/5]
 
-** TODO Hashing [5/6]
+** DONE Hashing [6/6]
 *** DONE SHA2 [6/6]
 **** DONE SHA-224
 **** DONE SHA-256
@@ -52,9 +52,9 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
 **** DONE MD5
 **** DONE MD4
      # NOTE: Unless explicitly requested I will not be supporting MD2
-*** TODO BLAKE2 [1/2]
+*** DONE BLAKE2 [2/2]
 **** DONE BLAKE2b
-**** TODO BLAKE2s
+**** DONE BLAKE2s
 ** TODO AEAD [1/5]
 *** DONE AES-GCM [3/3]
 **** DONE 256

@@ -1,37 +1,37 @@
 
 # Table of Contents
 
-1.  [`wolf-crypto`](#org7e85d3e)
-2.  [Current Priorities](#orgeb1dcb9)
-3.  [License](#org767daa7)
-4.  [Notes](#org225dcfd)
-5.  [Roadmap <code>[0/5]</code>](#orgbaa6c62)
-    1.  [Hashing <code>[5/6]</code>](#org0f47777)
-        1.  [SHA2 <code>[6/6]</code>](#org46716c5)
-        2.  [SHA3 <code>[5/5]</code>](#orgbb6bfdf)
-        3.  [SHA <code>[1/1]</code>](#org6883056)
-        4.  [RIPEMD-160 <code>[1/1]</code>](#orgd571cc3)
-        5.  [MD <code>[2/2]</code>](#orgea01bf9)
-        6.  [BLAKE2 <code>[1/2]</code>](#org737eae0)
-    2.  [AEAD <code>[1/5]</code>](#orgb10f2fb)
-        1.  [AES-GCM <code>[3/3]</code>](#orga22a233)
-        2.  [ChaCha20-Poly1305 <code>[0/2]</code>](#orga49d53b)
-        3.  [AES-CCM <code>[0/3]</code>](#org152bee3)
-        4.  [AES-EAX <code>[0/3]</code>](#org194a8e5)
-        5.  [AES-SIV <code>[0/3]</code>](#org9d1d2bd)
-    3.  [Symmetric Encryption <code>[0/3]</code>](#org2748b6f)
-        1.  [AES <code>[1/4]</code>](#org14bc9af)
-        2.  [ChaCha20 <code>[0/2]</code>](#orgad8306d)
-        3.  [3DES <code>[0/1]</code>](#orgc1be5da)
-    4.  [MAC <code>[0/2]</code>](#org35f816b)
-        1.  [HMAC <code>[0/9]</code>](#org26434a3)
-        2.  [Poly1305 <code>[0/1]</code>](#org0a99d7c)
-    5.  [Writing the Remaining Sections (asymmetric, password, padding, etc)](#org2aec607)
+1.  [`wolf-crypto`](#org44906f4)
+2.  [Current Priorities](#org9c453ad)
+3.  [License](#orgb5efdb8)
+4.  [Notes](#org98b8bb0)
+5.  [Roadmap <code>[1/5]</code>](#orgb4bc83b)
+    1.  [Hashing <code>[6/6]</code>](#orgfc1da6b)
+        1.  [SHA2 <code>[6/6]</code>](#orgbb68353)
+        2.  [SHA3 <code>[5/5]</code>](#org17bfb4b)
+        3.  [SHA <code>[1/1]</code>](#org007821d)
+        4.  [RIPEMD-160 <code>[1/1]</code>](#org300ae96)
+        5.  [MD <code>[2/2]</code>](#orgb955a53)
+        6.  [BLAKE2 <code>[2/2]</code>](#org8b0f630)
+    2.  [AEAD <code>[1/5]</code>](#orgbe8c0da)
+        1.  [AES-GCM <code>[3/3]</code>](#org99dfbf8)
+        2.  [ChaCha20-Poly1305 <code>[0/2]</code>](#org125bddc)
+        3.  [AES-CCM <code>[0/3]</code>](#org8f3ae01)
+        4.  [AES-EAX <code>[0/3]</code>](#orgf2c5b59)
+        5.  [AES-SIV <code>[0/3]</code>](#org3c658b6)
+    3.  [Symmetric Encryption <code>[0/3]</code>](#orgd432248)
+        1.  [AES <code>[1/4]</code>](#orgf53b3e8)
+        2.  [ChaCha20 <code>[0/2]</code>](#orgb8364e6)
+        3.  [3DES <code>[0/1]</code>](#orgecc464a)
+    4.  [MAC <code>[0/2]</code>](#orga96262a)
+        1.  [HMAC <code>[0/9]</code>](#orgb90f93e)
+        2.  [Poly1305 <code>[0/1]</code>](#org32a9b44)
+    5.  [Writing the Remaining Sections (asymmetric, password, padding, etc)](#orgde728c0)
 
 **WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.**
 
 
-<a id="org7e85d3e"></a>
+<a id="org44906f4"></a>
 
 # `wolf-crypto`
 
@@ -46,7 +46,7 @@ I personally would not be comfortable using anything in a general purpose applic
 work in security).
 
 
-<a id="orgeb1dcb9"></a>
+<a id="org9c453ad"></a>
 
 # Current Priorities
 
@@ -56,14 +56,14 @@ work in security).
 -   Enable `FIPS-MODE` support in `wolf-crypto-sys` to align with the FIPS compliance goals.
 
 
-<a id="org767daa7"></a>
+<a id="orgb5efdb8"></a>
 
 # License
 
 This library is under GPLv2 licensing **unless** you purchased a commercial license from wolfSSL.
 
 
-<a id="org225dcfd"></a>
+<a id="org98b8bb0"></a>
 
 # Notes
 
@@ -71,17 +71,17 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 -   Why is this named `wolf-crypto` and not `wolfcrypt`: I did not want to take the official name by wolfSSL.
 
 
-<a id="orgbaa6c62"></a>
+<a id="orgb4bc83b"></a>
 
-# TODO Roadmap <code>[0/5]</code>
-
-
-<a id="org0f47777"></a>
-
-## TODO Hashing <code>[5/6]</code>
+# TODO Roadmap <code>[1/5]</code>
 
 
-<a id="org46716c5"></a>
+<a id="orgfc1da6b"></a>
+
+## DONE Hashing <code>[6/6]</code>
+
+
+<a id="orgbb68353"></a>
 
 ### DONE SHA2 <code>[6/6]</code>
 
@@ -98,7 +98,7 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 6.  DONE SHA-512/256
 
 
-<a id="orgbb6bfdf"></a>
+<a id="org17bfb4b"></a>
 
 ### DONE SHA3 <code>[5/5]</code>
 
@@ -117,17 +117,17 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
     2.  DONE SHAKE256
 
 
-<a id="org6883056"></a>
+<a id="org007821d"></a>
 
 ### DONE SHA <code>[1/1]</code>
 
 
-<a id="orgd571cc3"></a>
+<a id="org300ae96"></a>
 
 ### DONE RIPEMD-160 <code>[1/1]</code>
 
 
-<a id="orgea01bf9"></a>
+<a id="orgb955a53"></a>
 
 ### DONE MD <code>[2/2]</code>
 
@@ -136,21 +136,21 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 2.  DONE MD4
 
 
-<a id="org737eae0"></a>
+<a id="org8b0f630"></a>
 
-### TODO BLAKE2 <code>[1/2]</code>
+### DONE BLAKE2 <code>[2/2]</code>
 
 1.  DONE BLAKE2b
 
-2.  TODO BLAKE2s
+2.  DONE BLAKE2s
 
 
-<a id="orgb10f2fb"></a>
+<a id="orgbe8c0da"></a>
 
 ## TODO AEAD <code>[1/5]</code>
 
 
-<a id="orga22a233"></a>
+<a id="org99dfbf8"></a>
 
 ### DONE AES-GCM <code>[3/3]</code>
 
@@ -161,7 +161,7 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 3.  DONE 128
 
 
-<a id="orga49d53b"></a>
+<a id="org125bddc"></a>
 
 ### TODO ChaCha20-Poly1305 <code>[0/2]</code>
 
@@ -170,7 +170,7 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 2.  TODO 128
 
 
-<a id="org152bee3"></a>
+<a id="org8f3ae01"></a>
 
 ### TODO AES-CCM <code>[0/3]</code>
 
@@ -181,7 +181,7 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 3.  DONE 128
 
 
-<a id="org194a8e5"></a>
+<a id="orgf2c5b59"></a>
 
 ### TODO AES-EAX <code>[0/3]</code>
 
@@ -192,7 +192,7 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 3.  TODO 128
 
 
-<a id="org9d1d2bd"></a>
+<a id="org3c658b6"></a>
 
 ### TODO AES-SIV <code>[0/3]</code>
 
@@ -203,12 +203,12 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 3.  TODO 128
 
 
-<a id="org2748b6f"></a>
+<a id="orgd432248"></a>
 
 ## TODO Symmetric Encryption <code>[0/3]</code>
 
 
-<a id="org14bc9af"></a>
+<a id="orgf53b3e8"></a>
 
 ### TODO AES <code>[1/4]</code>
 
@@ -243,7 +243,7 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
     3.  TODO 128
 
 
-<a id="orgad8306d"></a>
+<a id="orgb8364e6"></a>
 
 ### TODO ChaCha20 <code>[0/2]</code>
 
@@ -252,19 +252,19 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 2.  TODO 128
 
 
-<a id="orgc1be5da"></a>
+<a id="orgecc464a"></a>
 
 ### TODO 3DES <code>[0/1]</code>
 
 1.  TODO 168
 
 
-<a id="org35f816b"></a>
+<a id="orga96262a"></a>
 
 ## TODO MAC <code>[0/2]</code>
 
 
-<a id="org26434a3"></a>
+<a id="orgb90f93e"></a>
 
 ### TODO HMAC <code>[0/9]</code>
 
@@ -287,12 +287,12 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 9.  TODO MD5
 
 
-<a id="org0a99d7c"></a>
+<a id="org32a9b44"></a>
 
 ### TODO Poly1305 <code>[0/1]</code>
 
 
-<a id="org2aec607"></a>
+<a id="orgde728c0"></a>
 
 ## TODO Writing the Remaining Sections (asymmetric, password, padding, etc)
 
