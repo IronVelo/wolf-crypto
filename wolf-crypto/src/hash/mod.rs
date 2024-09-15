@@ -53,10 +53,17 @@ non_fips! {
     pub use md4::Md4;
 
     #[doc(hidden)]
+    pub mod sha;
+    pub use sha::Sha;
+
+    #[macro_use]
+    mod blake_api;
+
+    #[doc(hidden)]
     pub mod blake2b;
     pub use blake2b::Blake2b;
 
     #[doc(hidden)]
-    pub mod sha;
-    pub use sha::Sha;
+    pub mod blake2s;
+    pub use blake2s::Blake2s;
 }
