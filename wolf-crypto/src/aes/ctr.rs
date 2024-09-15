@@ -197,6 +197,7 @@ macro_rules! impl_aes_type {
 }
 
 impl_aes_type! {
+    /// Represents an AES-CTR (Counter Mode) instance.
     struct AesCtr,
     direction ENCRYPT,
     api {
@@ -240,7 +241,7 @@ impl_aes_type! {
         /// # Example
         ///
         /// ```
-        /// use wolf_crypto::{buf::Iv, aes::{Key, ctr::AesCtr}};
+        /// use wolf_crypto::{buf::Iv, aes::{Key, AesCtr}};
         ///
         /// // securely generate a random key and initialization vector ...
         /// # let mut key = Key::Aes256([1u8; 32]);
@@ -291,7 +292,7 @@ impl_aes_type! {
         /// # Example
         ///
         /// ```
-        /// use wolf_crypto::{buf::Iv, aes::{Key, ctr::AesCtr}};
+        /// use wolf_crypto::{buf::Iv, aes::{Key, AesCtr}};
         /// // securely generate a random key and initialization vector ...
         /// # let mut key = Key::Aes256([1u8; 32]);
         /// # let iv = Iv::new([2u8; 16]);
@@ -337,7 +338,7 @@ impl_aes_type! {
         /// # Example
         ///
         /// ```
-        /// use wolf_crypto::{buf::Iv, aes::{Key, ctr::AesCtr}};
+        /// use wolf_crypto::{buf::Iv, aes::{Key, AesCtr}};
         /// // securely generate a random key and initialization vector ...
         /// # let mut key = Key::Aes256([1u8; 32]);
         /// # let iv = Iv::new([2u8; 16]);
@@ -383,7 +384,7 @@ impl_aes_type! {
         /// # Example
         ///
         /// ```
-        /// use wolf_crypto::{buf::Iv, aes::{Key, ctr::AesCtr}};
+        /// use wolf_crypto::{buf::Iv, aes::{Key, AesCtr}};
         /// // securely generate a random key and initialization vector ...
         /// # let mut key = Key::Aes256([1u8; 32]);
         /// # let iv = Iv::new([2u8; 16]);

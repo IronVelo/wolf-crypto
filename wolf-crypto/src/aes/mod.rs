@@ -14,9 +14,16 @@
 //         }
 //     };
 // }
-#![allow(dead_code)]
-pub mod gcm;
-pub mod ctr;
+
+hidden! {
+    pub mod gcm;
+    pub mod ctr;
+}
+
+pub use {
+    gcm::{AesGcm, Tag, Aad},
+    crate::aes::ctr::AesCtr
+};
 
 #[cfg(test)]
 pub mod test_utils;
@@ -24,21 +31,39 @@ pub mod test_utils;
 use wolf_crypto_sys::{
     Aes as AesLL,
     wc_AesInit,
-    INVALID_DEVID, AES_ENCRYPTION, AES_DECRYPTION,
+    INVALID_DEVID, AES_ENCRYPTION,
 };
 
 use zeroize::Zeroize;
 use core::mem::MaybeUninit;
 use crate::opaque_res::Res;
 
+/// Represents different AES key sizes.
+///
+/// AES (Advanced Encryption Standard) supports three key sizes:
+/// - 128-bit (16 bytes)
+/// - 192-bit (24 bytes)
+/// - 256-bit (32 bytes)
+///
+/// This enum allows for type-safe handling of these different key sizes.
 #[cfg_attr(test, derive(Debug, Clone, PartialEq))]
 pub enum Key {
+    /// 256-bit AES key (32 bytes)
     Aes256([u8; 32]),
+    /// 192-bit AES key (24 bytes)
     Aes192([u8; 24]),
+    /// 128-bit AES key (16 bytes)
     Aes128([u8; 16])
 }
 
 impl Key {
+    /// Returns the capacity (size in bytes) of the key.
+    ///
+    /// # Returns
+    ///
+    /// - `32` for Aes256
+    /// - `24` for Aes192
+    /// - `16` for Aes128
     #[inline]
     pub const fn capacity(&self) -> usize {
         match self {
@@ -48,6 +73,7 @@ impl Key {
         }
     }
 
+    /// Returns a reference to the key as a byte slice.
     #[inline]
     pub const fn as_slice(&self) -> &[u8] {
         match self {
@@ -57,6 +83,7 @@ impl Key {
         }
     }
 
+    /// Returns a mutable reference to the key as a byte slice.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         match self {
@@ -66,6 +93,12 @@ impl Key {
         }
     }
 
+    /// Zeros out the key for security purposes.
+    ///
+    /// This method uses the `zeroize` crate to ensure that the key material
+    /// is securely erased from memory.
+    ///
+    /// This is called in the `Key` drop implementation.
     #[inline]
     pub fn zero(&mut self) {
         self.as_mut_slice().zeroize();
@@ -73,6 +106,7 @@ impl Key {
 }
 
 impl Drop for Key {
+    /// Zeroes the underlying key material.
     fn drop(&mut self) {
         self.zero();
     }
@@ -106,7 +140,7 @@ pub(crate) struct AesM {
 
 impl AesM {
     pub const ENCRYPT: Self = Self { mode: AES_ENCRYPTION };
-    pub const DECRYPT: Self = Self { mode: AES_DECRYPTION };
+    // pub const DECRYPT: Self = Self { mode: AES_DECRYPTION };
 
     #[inline]
     pub const fn mode(&self) -> core::ffi::c_uint {

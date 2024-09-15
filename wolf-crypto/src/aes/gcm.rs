@@ -1,4 +1,4 @@
-use crate::aes::{AesM, init_aes, Key};
+use crate::aes::{init_aes, Key};
 use crate::buf::{GenericIv};
 use core::ptr::{addr_of_mut};
 use core::ffi::{c_int};
@@ -8,11 +8,13 @@ use core::mem::MaybeUninit;
 use crate::opaque_res::Res;
 use crate::ptr::{ConstPtr};
 
+/// Represents an AES-GCM (Galois/Counter Mode) instance.
 #[repr(transparent)]
 pub struct AesGcm {
     inner: AesLL,
 }
 
+/// Represents Additional Authenticated Data (AAD) for AES-GCM operations.
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct Aad<'s> {
@@ -20,8 +22,10 @@ pub struct Aad<'s> {
 }
 
 impl<'s> Aad<'s> {
+    /// An empty AAD.
     pub const EMPTY: Self = Self { inner: None };
 
+    /// Create a new AAD instance from a byte slice.
     pub const fn new(aad: &'s [u8]) -> Self {
         Self { inner: Some(aad) }
     }
@@ -56,6 +60,7 @@ impl<'s> Aad<'s> {
     }
 }
 
+/// Represents the authentication tag produced by AES-GCM encryption.
 #[must_use = "You must use the tag, or GCM is doing nothing for you"]
 #[derive(Copy, Clone)]
 #[repr(transparent)]
@@ -70,21 +75,50 @@ impl fmt::Debug for Tag {
 }
 
 impl Tag {
+    /// The size of the authentication tag in bytes.
     pub const CAPACITY: usize = 16;
 
+    /// Creates a new `Tag` instance from a 16-byte array.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - A 16-byte array containing the authentication tag.
+    ///
+    /// # Returns
+    ///
+    /// A new `Tag` instance.
     pub const fn new(inner: [u8; Self::CAPACITY]) -> Self {
         Self { inner }
     }
 
+    /// Creates a new `Tag` instance filled with zeros.
+    ///
+    /// This is typically used to create a tag buffer that will be filled
+    /// by an encryption operation.
+    ///
+    /// # Returns
+    ///
+    /// A new `Tag` instance with all bytes set to zero.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::aes::gcm::Tag;
+    ///
+    /// let tag = Tag::new_zeroed();
+    /// assert_eq!(tag.as_slice(), &[0u8; 16]);
+    /// ```
     pub const fn new_zeroed() -> Self {
         Self::new([0u8; Self::CAPACITY])
     }
 
+    /// Consumes the `Tag` and returns the underlying 16-byte array.
     #[inline]
     pub fn take(self) -> [u8; Self::CAPACITY] {
         self.inner
     }
 
+    /// Returns a reference to the tag as a byte slice.
     pub const fn as_slice(&self) -> &[u8] {
         self.inner.as_slice()
     }
@@ -111,8 +145,19 @@ pub(crate) unsafe fn aes_set_key(aes: *mut AesLL, key: ConstPtr<Key>) -> c_int {
 }
 
 impl AesGcm {
-    const MODE: AesM = AesM::ENCRYPT;
-
+    /// Create a new AES-GCM instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key material to use.
+    ///
+    /// # Returns
+    ///
+    /// A new AES-GCM instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key setup fails.
     pub fn new(key: &Key) -> Result<Self, ()> {
         unsafe {
             let (mut aes, mut res) = init_aes(MaybeUninit::<AesLL>::uninit());
@@ -126,6 +171,36 @@ impl AesGcm {
         Self { inner }
     }
 
+    /// Encrypt data using AES-GCM with compile-time known sizes.
+    ///
+    /// # Arguments
+    ///
+    /// * `nonce` - The nonce (IV) to use for encryption.
+    /// * `input` - The input data to encrypt.
+    /// * `output` - The output buffer to store the encrypted data.
+    /// * `aad` - Additional Authenticated Data.
+    ///
+    /// # Returns
+    ///
+    /// The authentication tag on success, or an error.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    ///
+    /// let key = Key::Aes256([1u8; 32]);
+    /// let nonce: Nonce = [2u8; 12].into();;
+    ///
+    /// let input = [3u8; 32];
+    /// let mut output = [0u8; 32];
+    /// let aad = Aad::EMPTY;
+    ///
+    /// let mut gcm = AesGcm::new(&key).unwrap();
+    /// let tag = gcm.encrypt_sized(nonce, &input, &mut output, aad).unwrap();
+    ///
+    /// assert_ne!(input, output);
+    /// ```
     #[inline]
     pub fn encrypt_sized<const C: usize, N: GenericIv>(
         &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: Aad
@@ -149,6 +224,41 @@ impl AesGcm {
             && aad.try_size().is_some()
     }
 
+    /// Try to encrypt data using AES-GCM.
+    ///
+    /// # Arguments
+    ///
+    /// * `nonce` - The nonce (IV) to use for encryption.
+    /// * `input` - The input data to encrypt.
+    /// * `output` - The output buffer to store the encrypted data.
+    /// * `aad` - Additional Authenticated Data.
+    ///
+    /// # Returns
+    ///
+    /// The authentication tag on success, or an error.
+    ///
+    /// # Errors
+    ///
+    /// - If the input buffer is larger than the output buffer.
+    /// - If the input or AAD size is greater than what can be represented by a u32.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    ///
+    /// let key = Key::Aes256([1u8; 32]);
+    /// let nonce: Nonce = [2u8; 12].into();
+    ///
+    /// let mut output = [0u8; 32];
+    /// let input = [3u8; 32];
+    /// let aad = Aad::EMPTY;
+    ///
+    /// let mut gcm = AesGcm::new(&key).unwrap();
+    /// let tag = gcm.try_encrypt(nonce, &input, &mut output, aad).unwrap();
+    ///
+    /// assert_ne!(input, output);
+    /// ```
     #[inline]
     pub fn try_encrypt<N: GenericIv>(
         &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad
@@ -166,6 +276,44 @@ impl AesGcm {
         }
     }
 
+    /// Encrypt data using AES-GCM, panicking on failure.
+    ///
+    /// This method is only available when the "panic-api" feature is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `nonce` - The nonce (IV) to use for encryption.
+    /// * `input` - The input data to encrypt.
+    /// * `output` - The output buffer to store the encrypted data.
+    /// * `aad` - Additional Authenticated Data.
+    ///
+    /// # Returns
+    ///
+    /// The authentication tag.
+    ///
+    /// # Panics
+    ///
+    /// - If the input buffer is larger than the output buffer.
+    /// - If the input or AAD size is greater than what can be represented by a u32.
+    /// - If the encryption operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    ///
+    /// let key = Key::Aes256([1u8; 32]);
+    /// let nonce: Nonce = [2u8; 12].into();
+    ///
+    /// let mut output = [0u8; 32];
+    /// let input = [3u8; 32];
+    /// let aad = Aad::EMPTY;
+    ///
+    /// let mut gcm = AesGcm::new(&key).unwrap();
+    /// let tag = gcm.encrypt(nonce, &input, &mut output, aad);
+    ///
+    /// assert_ne!(input, output);
+    /// ```
     #[cfg(feature = "panic-api")]
     #[track_caller]
     #[inline]
@@ -197,6 +345,41 @@ impl AesGcm {
         res.unit_err(tag)
     }
 
+    /// Decrypt data using AES-GCM with compile-time known sizes.
+    ///
+    /// # Arguments
+    ///
+    /// * `nonce` - The nonce (IV) used for encryption.
+    /// * `input` - The input data to decrypt.
+    /// * `output` - The output buffer to store the decrypted data.
+    /// * `aad` - Additional Authenticated Data.
+    /// * `tag` - The authentication tag from encryption.
+    ///
+    /// # Returns
+    ///
+    /// A `Res` indicating success or failure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    ///
+    /// let key = Key::Aes256([1u8; 32]);
+    /// let nonce: Nonce = [2u8; 12].into();
+    ///
+    /// let mut ciphertext = [0u8; 32];
+    /// let plaintext = [3u8; 32];
+    /// let aad = Aad::EMPTY;
+    ///
+    /// let mut gcm = AesGcm::new(&key).unwrap();
+    /// let tag = gcm.encrypt_sized(nonce.copy(), &plaintext, &mut ciphertext, aad).unwrap();
+    ///
+    /// let mut decrypted = [0u8; 32];
+    /// let result = gcm.decrypt_sized(nonce, &ciphertext, &mut decrypted, aad, &tag);
+    ///
+    /// assert!(result.is_ok());
+    /// assert_eq!(plaintext, decrypted);
+    /// ```
     #[inline]
     pub fn decrypt_sized<const C: usize, N: GenericIv>(
         &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: Aad, tag: &Tag
@@ -216,6 +399,47 @@ impl AesGcm {
         }
     }
 
+    /// Try to decrypt data using AES-GCM.
+    ///
+    /// # Arguments
+    ///
+    /// * `nonce` - The nonce (IV) used for encryption.
+    /// * `input` - The input data to decrypt.
+    /// * `output` - The output buffer to store the decrypted data.
+    /// * `aad` - Additional Authenticated Data.
+    /// * `tag` - The authentication tag from encryption.
+    ///
+    /// # Returns
+    ///
+    /// A `Res` indicating success or failure.
+    ///
+    /// # Errors
+    ///
+    /// - If the input buffer is larger than the output buffer.
+    /// - If the input or AAD size is greater than what can be represented by a u32.
+    /// - If the decryption operation fails (including authentication failure).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    ///
+    /// let key = Key::Aes256([1u8; 32]);
+    /// let nonce: Nonce = [2u8; 12].into();
+    ///
+    /// let mut ciphertext = [0u8; 32];
+    /// let plaintext = [3u8; 32];
+    /// let aad = Aad::EMPTY;
+    ///
+    /// let mut gcm = AesGcm::new(&key).unwrap();
+    /// let tag = gcm.try_encrypt(nonce.copy(), &plaintext, &mut ciphertext, aad).unwrap();
+    ///
+    /// let mut decrypted = [0u8; 32];
+    /// let result = gcm.try_decrypt(nonce, &ciphertext, &mut decrypted, aad, &tag);
+    ///
+    /// assert!(result.is_ok());
+    /// assert_eq!(plaintext, decrypted);
+    /// ```
     #[inline]
     pub fn try_decrypt<N: GenericIv>(
         &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad, tag: &Tag
@@ -233,6 +457,44 @@ impl AesGcm {
         }
     }
 
+    /// Decrypt data using AES-GCM, panicking on failure.
+    ///
+    /// This method is only available when the "panic-api" feature is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `nonce` - The nonce (IV) used for encryption.
+    /// * `input` - The input data to decrypt.
+    /// * `output` - The output buffer to store the decrypted data.
+    /// * `aad` - Additional Authenticated Data.
+    /// * `tag` - The authentication tag from encryption.
+    ///
+    /// # Panics
+    ///
+    /// - If the input buffer is larger than the output buffer.
+    /// - If the input or AAD size is greater than what can be represented by a u32.
+    /// - If the decryption operation fails (including authentication failure).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    ///
+    /// let key = Key::Aes256([1u8; 32]);
+    /// let nonce: Nonce = [2u8; 12].into();
+    ///
+    /// let mut ciphertext = [0u8; 32];
+    /// let plaintext = [3u8; 32];
+    /// let aad = Aad::EMPTY;
+    ///
+    /// let mut gcm = AesGcm::new(&key).unwrap();
+    /// let tag = gcm.encrypt(nonce.copy(), &plaintext, &mut ciphertext, aad);
+    ///
+    /// let mut decrypted = [0u8; 32];
+    /// gcm.decrypt(nonce, &ciphertext, &mut decrypted, aad, &tag);
+    ///
+    /// assert_eq!(plaintext, decrypted);
+    /// ```
     #[cfg(feature = "panic-api")]
     #[inline]
     #[track_caller]
