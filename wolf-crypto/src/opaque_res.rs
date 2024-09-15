@@ -81,4 +81,10 @@ impl Res {
             Err(())
         }
     }
+
+    #[inline]
+    #[track_caller]
+    pub fn unwrap(self) {
+        self.unit_err(()).unwrap();
+    }
 }
