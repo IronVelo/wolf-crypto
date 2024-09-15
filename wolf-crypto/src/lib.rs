@@ -1,3 +1,4 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_builtins)]
 #[cfg(test)]
