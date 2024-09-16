@@ -1,19 +1,19 @@
 
 # Table of Contents
 
-1.  [NIST MCT and KATs](#org9085813)
-    1.  [Introduction](#orge996d62)
-    2.  [Current State](#org2d7cc4c)
-    3.  [FOSS Test Module?](#org912df49)
-    4.  [Requirements To Run Tests](#orgf2659a9)
+1.  [NIST MCT and KATs](#org6fbac5b)
+    1.  [Introduction](#orgf681d30)
+    2.  [Current State](#org931588b)
+    3.  [FOSS Test Module?](#org9f8e928)
+    4.  [Requirements To Run Tests](#org708ea71)
 
 
-<a id="org9085813"></a>
+<a id="org6fbac5b"></a>
 
 # NIST MCT and KATs
 
 
-<a id="orge996d62"></a>
+<a id="orgf681d30"></a>
 
 ## Introduction
 
@@ -32,7 +32,7 @@ For more information on this test suite, please see the relevant papers from NIS
 -   [The Secure Hash Algorithm Validation System (SHAVS)](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/shs/SHAVS.pdf)
 
 
-<a id="org2d7cc4c"></a>
+<a id="org931588b"></a>
 
 ## Current State
 
@@ -56,17 +56,16 @@ The next steps are:
 5.  Create SHAKE MCT tests
 
 
-<a id="org912df49"></a>
+<a id="org9f8e928"></a>
 
 ## FOSS Test Module?
 
 Other implementations of hash functions (to the extent of my knowledge) in Rust do not leverage these
-test suites by NIST. While I am not implying any of their implementations are incorrect, it is a
-valuable suite of tests and the tools we have created for running these tests could be of value to
-them.
+test suites by NIST. While I am not implying any of their implementations are incorrect, the suite of
+tests and the tools we have created for running these tests could be of value to them.
 
 
-<a id="orgf2659a9"></a>
+<a id="org708ea71"></a>
 
 ## Requirements To Run Tests
 

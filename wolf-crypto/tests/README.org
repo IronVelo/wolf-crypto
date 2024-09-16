@@ -40,9 +40,8 @@ The next steps are:
 ** FOSS Test Module?
 
 Other implementations of hash functions (to the extent of my knowledge) in Rust do not leverage these
-test suites by NIST. While I am not implying any of their implementations are incorrect, it is a
-valuable suite of tests and the tools we have created for running these tests could be of value to
-them.
+test suites by NIST. While I am not implying any of their implementations are incorrect, the suite of
+tests and the tools we have created for running these tests could be of value to them.
 
 ** Requirements To Run Tests
 
