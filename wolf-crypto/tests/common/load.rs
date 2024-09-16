@@ -115,7 +115,7 @@ fn load_test(needs_setup: &Setup, local: &mut PathBuf) -> io::Result<()> {
     unzip_to(local, needs_setup.unzip())
 }
 
-fn load_from(mut ns_iter: impl Iterator<Item = &Setup>) -> io::Result<()> {
+fn load_from<'a>(mut ns_iter: impl Iterator<Item = &'a Setup>) -> io::Result<()> {
     let Some(first) = ns_iter.next() else {
         // no items
         return Ok(())
