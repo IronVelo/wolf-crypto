@@ -37,6 +37,7 @@ sha1 = "0.10.6"
 blake2 = "0.10.6"
 rand = "0.8.5"
 hex-literal = "0.4.1"
+hex = "0.4.3"
 
 [[bench]]
 name = "aes-gcm"
