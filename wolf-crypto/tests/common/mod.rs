@@ -117,12 +117,11 @@ macro_rules! make_md_mct {
 
             // Our seed should be equivalent as the MD for this COUNT
             let (count, expected) = test.next_item_sized::<{ $sz }>().unwrap();
-            let count = core::str::from_utf8(count).unwrap(); // See I'm not doing that much unsafe.
 
             assert_eq!(
                 seed.as_slice(), expected.as_slice(),
                 "Failed at count {} with seed: {}",
-                count, hex::encode(&seed)
+                core::str::from_utf8(count).unwrap(), hex::encode(&seed)
             );
         }
 
