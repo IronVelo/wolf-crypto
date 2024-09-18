@@ -90,8 +90,8 @@ macro_rules! blake_api {
                 "assert!(", stringify!($name), "::<{", stringify!($max * 2), "}>::new().is_err());"
             )]
             #[doc = "```"]
-            pub fn new() -> Result<Self, ()> {
-                if !$crate::const_lte::<C, { $max }>() { return Err(()); }
+            pub fn new() -> Result<Self, $crate::error::Unspecified> {
+                if !$crate::const_lte::<C, { $max }>() { return Err($crate::error::Unspecified); }
                 let mut res = $crate::opaque_res::Res::new();
 
                 unsafe {
@@ -102,7 +102,6 @@ macro_rules! blake_api {
             }
 
             #[inline]
-            #[must_use]
             unsafe fn new_with_key_unchecked(
                 key: &[u8]
             ) -> (::core::mem::MaybeUninit<$wc>, $crate::opaque_res::Res) {
@@ -172,9 +171,9 @@ macro_rules! blake_api {
                 ">::new_with_key(&long_key).is_err());"
             )]
             #[doc = "```"]
-            pub fn new_with_key(key: &[u8]) -> Result<Self, ()> {
+            pub fn new_with_key(key: &[u8]) -> Result<Self, $crate::error::Unspecified> {
                 if !($crate::const_lte::<C, { $max }>() && $crate::lte::<{ $max }>(key.len())) {
-                    return Err(());
+                    return Err($crate::error::Unspecified);
                 }
 
                 unsafe {
@@ -234,9 +233,9 @@ macro_rules! blake_api {
             )]
             #[doc = "```"]
             #[doc = "[`new_with_key`]: Self::new_with_key"]
-            pub fn new_with_sized_key<const K: usize>(key: &[u8; K]) -> Result<Self, ()> {
+            pub fn new_with_sized_key<const K: usize>(key: &[u8; K]) -> Result<Self, $crate::error::Unspecified> {
                 if !($crate::const_lte::<C, { $max }>() && $crate::const_lte::<K, { $max }>()) {
-                    return Err(());
+                    return Err($crate::error::Unspecified);
                 }
 
                 unsafe {
@@ -578,7 +577,7 @@ macro_rules! blake_api {
             #[doc = concat!("assert_eq!(res.len(), ", stringify!($max), ");")]
             #[doc = "```"]
             #[inline]
-            pub fn try_finalize(self) -> Result<[u8; C], ()> {
+            pub fn try_finalize(self) -> Result<[u8; C], $crate::error::Unspecified> {
                 let mut buf = [0u8; C];
                 self.finalize_into_exact(&mut buf).unit_err(buf)
             }

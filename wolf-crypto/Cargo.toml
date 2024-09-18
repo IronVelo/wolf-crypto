@@ -12,6 +12,7 @@ readme = "README.md"
 description = "Safe and thin API for wolfSSL's wolfcrypt"
 
 [features]
+std = []
 panic-api = []
 allow-non-fips = []
 default = ["panic-api", "allow-non-fips"]

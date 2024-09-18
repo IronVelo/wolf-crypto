@@ -90,7 +90,7 @@ macro_rules! copy_impl {
                     assert_eq!(
                         $copy(
                             // See above commentary as to why this is safe.
-                            ::core::ptr::addr_of!(self.inner) as *mut $wc,
+                            ::core::ptr::addr_of!(self.inner).cast_mut(),
                             inner.as_mut_ptr()
                         ),
                         0,
@@ -326,7 +326,7 @@ macro_rules! make_api {
             #[doc = "assert_ne!(finalized.as_slice(), input.as_slice());"]
             #[doc = concat!("assert_eq!(finalized.len(), ", stringify!($bs), ");")]
             #[doc = "```"]
-            pub fn new() -> Result<Self, ()> {
+            pub fn new() -> Result<Self, $crate::error::Unspecified> {
                 unsafe {
                     let mut res = $crate::opaque_res::Res::new();
                     let mut inner = ::core::mem::MaybeUninit::<$wc>::uninit();
@@ -754,7 +754,7 @@ macro_rules! make_api {
             #[doc = "assert_ne!(res.as_slice(), input.as_slice());"]
             #[doc = "```"]
             #[inline]
-            pub fn try_finalize(&mut self) -> Result<[u8; $bs], ()> {
+            pub fn try_finalize(&mut self) -> Result<[u8; $bs], $crate::error::Unspecified> {
                 let mut buf = [0u8; $bs];
                 self.finalize_into_exact(&mut buf).unit_err(buf)
             }

@@ -54,7 +54,7 @@ macro_rules! shake_api {
             #[doc = "assert_eq!(finalized.len(), 32);"]
             #[doc = "assert_ne!(finalized.as_slice(), input.as_slice());"]
             #[doc = "```"]
-            pub fn new() -> Result<Self, ()> {
+            pub fn new() -> Result<Self, $crate::error::Unspecified> {
                 unsafe {
                     let mut res = $crate::opaque_res::Res::new();
                     let mut inner = ::core::mem::MaybeUninit::<$wc>::uninit();
@@ -407,7 +407,7 @@ macro_rules! shake_api {
             #[doc = "assert_ne!(res.as_slice(), input.as_slice());"]
             #[doc = "```"]
             #[inline]
-            pub fn try_finalize<const C: usize>(&mut self) -> Result<[u8; C], ()> {
+            pub fn try_finalize<const C: usize>(&mut self) -> Result<[u8; C], $crate::error::Unspecified> {
                 let mut buf = [0u8; C];
                 self.finalize_into_sized(&mut buf).unit_err(buf)
             }
@@ -440,7 +440,7 @@ macro_rules! shake_api {
             #[doc = "assert_ne!(res.as_slice(), input.as_slice());"]
             #[doc = "```"]
             #[inline]
-            pub fn finalize_default(&mut self) -> Result<[u8; $ds], ()> {
+            pub fn finalize_default(&mut self) -> Result<[u8; $ds], $crate::error::Unspecified> {
                 self.try_finalize::<{ $ds }>()
             }
 

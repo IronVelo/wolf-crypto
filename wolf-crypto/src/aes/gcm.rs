@@ -5,6 +5,8 @@ use core::ffi::{c_int};
 use wolf_crypto_sys::{Aes as AesLL, wc_AesGcmEncrypt, wc_AesGcmDecrypt, wc_AesGcmSetKey, wc_AesFree};
 use core::fmt;
 use core::mem::MaybeUninit;
+use crate::can_cast_u32;
+use crate::error::Unspecified;
 use crate::opaque_res::Res;
 use crate::ptr::{ConstPtr};
 
@@ -19,6 +21,16 @@ pub struct AesGcm {
 #[repr(transparent)]
 pub struct Aad<'s> {
     inner: Option<&'s [u8]>
+}
+
+#[inline]
+#[must_use]
+const fn to_u32(num: usize) -> Option<u32> {
+    if can_cast_u32(num) {
+        Some(num as u32)
+    } else {
+        None
+    }
 }
 
 impl<'s> Aad<'s> {
@@ -39,11 +51,19 @@ impl<'s> Aad<'s> {
         }
     }
 
-    #[cfg_attr(not(debug_assertions), inline(always))]
-    #[cfg_attr(debug_assertions, track_caller)]
+    #[cfg(debug_assertions)]
+    #[track_caller]
+    #[inline]
+    #[must_use]
     pub(crate) fn size(&self) -> u32 {
-        debug_assert!(!self.inner.is_some_and(|inner| u32::try_from(inner.len()).is_ok()));
+        assert!(self.is_valid_size());
+        self.inner.map_or(0, |inner| inner.len() as u32)
+    }
 
+    #[cfg(not(debug_assertions))]
+    #[inline]
+    #[must_use]
+    pub(crate) const fn size(&self) -> u32 {
         match self.inner {
             Some(inner) => inner.len() as u32,
             None => 0
@@ -52,10 +72,19 @@ impl<'s> Aad<'s> {
 
     #[inline(always)]
     #[must_use]
-    pub(crate) fn try_size(&self) -> Option<u32> {
+    pub const fn try_size(&self) -> Option<u32> {
         match self.inner {
-            Some(inner) => u32::try_from(inner.len()).ok(),
-            None => Some(0)
+            None => Some(0),
+            Some(val) => to_u32(val.len())
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn is_valid_size(&self) -> bool {
+        match self.inner {
+            Some(inner) => can_cast_u32(inner.len()),
+            None => true
         }
     }
 }
@@ -114,7 +143,7 @@ impl Tag {
 
     /// Consumes the `Tag` and returns the underlying 16-byte array.
     #[inline]
-    pub fn take(self) -> [u8; Self::CAPACITY] {
+    pub const fn take(self) -> [u8; Self::CAPACITY] {
         self.inner
     }
 
@@ -158,17 +187,12 @@ impl AesGcm {
     /// # Errors
     ///
     /// Returns an error if the key setup fails.
-    pub fn new(key: &Key) -> Result<Self, ()> {
+    pub fn new(key: &Key) -> Result<Self, Unspecified> {
         unsafe {
             let (mut aes, mut res) = init_aes(MaybeUninit::<AesLL>::uninit());
             res.ensure_0(aes_set_key(aes.as_mut_ptr(), ConstPtr::new(key)));
-            res.unit_err_with(|| Self::with_aes(aes.assume_init()))
+            res.unit_err_with(|| Self { inner: aes.assume_init() })
         }
-    }
-
-    #[inline]
-    const fn with_aes(inner: AesLL) -> Self {
-        Self { inner }
     }
 
     /// Encrypt data using AES-GCM with compile-time known sizes.
@@ -204,7 +228,7 @@ impl AesGcm {
     #[inline]
     pub fn encrypt_sized<const C: usize, N: GenericIv>(
         &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: Aad
-    ) -> Result<Tag, ()> {
+    ) -> Result<Tag, Unspecified> {
         unsafe {
             // SAFETY:
             //
@@ -218,10 +242,10 @@ impl AesGcm {
 
     #[inline]
     #[must_use]
-    fn arg_predicate(input: &[u8], output: &[u8], aad: Aad) -> bool {
+    const fn arg_predicate(input: &[u8], output: &[u8], aad: Aad) -> bool {
         input.len() <= output.len()
-            && input.len() <= (u32::MAX as usize)
-            && aad.try_size().is_some()
+            && can_cast_u32(input.len())
+            && aad.is_valid_size()
     }
 
     /// Try to encrypt data using AES-GCM.
@@ -262,9 +286,9 @@ impl AesGcm {
     #[inline]
     pub fn try_encrypt<N: GenericIv>(
         &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad
-    ) -> Result<Tag, ()> {
+    ) -> Result<Tag, Unspecified> {
         if !Self::arg_predicate(input, output, aad) {
-            return Err(())
+            return Err(Unspecified)
         }
 
         unsafe {
@@ -325,7 +349,7 @@ impl AesGcm {
 
     pub unsafe fn encrypt_unchecked(
         &mut self, nonce: &[u8], input: &[u8], output: &mut [u8], aad: Aad
-    ) -> Result<Tag, ()> {
+    ) -> Result<Tag, Unspecified> {
         let mut tag = Tag::new_zeroed();
         let mut res = Res::new();
 

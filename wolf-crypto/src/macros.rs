@@ -15,3 +15,12 @@ macro_rules! hidden {
         )*
     };
 }
+
+macro_rules! std {
+    ($($item:item)*) => {
+        $(
+            #[cfg(feature = "std")]
+            $item
+        )*
+    };
+}

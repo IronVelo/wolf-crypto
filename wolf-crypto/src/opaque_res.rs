@@ -4,6 +4,7 @@
 //! side-channel attacks through timing or error messages. It allows for
 //! accumulation of error states without revealing specific error details.
 use core::ffi::c_int;
+use crate::error::Unspecified;
 
 /// An opaque result type for error handling without exposing error details.
 ///
@@ -13,11 +14,18 @@ use core::ffi::c_int;
 #[repr(transparent)]
 pub struct Res(bool);
 
+impl Default for Res {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Res {
     /// Represents a successful result.
-    pub const OK: Res = Res(true);
+    pub const OK: Self = Self(true);
     /// Represents an error result.
-    pub const ERR: Res = Res(false);
+    pub const ERR: Self = Self(false);
 
     /// Creates a new `Res` instance initialized to `OK`.
     ///
@@ -111,7 +119,7 @@ impl Res {
         self.0 &= res.0;
     }
 
-    /// Converts the `Res` into a `Result<OK, ()>`.
+    /// Converts the `Res` into a `Result<OK, Unspecified>`.
     ///
     /// # Warning
     ///
@@ -124,17 +132,18 @@ impl Res {
     ///
     /// # Returns
     ///
-    /// `Ok(ok)` if the `Res` is OK, `Err(())` otherwise.
+    /// `Ok(ok)` if the `Res` is OK, `Err(Unspecified)` otherwise.
+    #[allow(clippy::missing_errors_doc)]
     #[inline(always)]
-    pub fn unit_err<OK>(self, ok: OK) -> Result<OK, ()> {
+    pub fn unit_err<OK>(self, ok: OK) -> Result<OK, Unspecified> {
         if self.is_ok() {
             Ok(ok)
         } else {
-            Err(())
+            Err(Unspecified)
         }
     }
 
-    /// Converts the `Res` into a `Result<OK, ()>`, with a closure for the OK case.
+    /// Converts the `Res` into a `Result<OK, Unspecified>`, with a closure for the OK case.
     ///
     /// # Warning
     ///
@@ -153,15 +162,16 @@ impl Res {
     ///
     /// # Returns
     ///
-    /// `Ok(ok())` if the `Res` is OK, `Err(())` otherwise.
+    /// `Ok(ok())` if the `Res` is OK, `Err(Unspecified)` otherwise.
     #[inline(always)]
-    pub fn unit_err_with<F, OK>(self, ok: F) -> Result<OK, ()>
+    #[allow(clippy::missing_errors_doc)]
+    pub fn unit_err_with<F, OK>(self, ok: F) -> Result<OK, Unspecified>
         where F: FnOnce() -> OK
     {
         if self.is_ok() {
             Ok(ok())
         } else {
-            Err(())
+            Err(Unspecified)
         }
     }
 

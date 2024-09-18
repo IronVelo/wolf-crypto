@@ -1,6 +1,7 @@
 //! Types for Keys, IVs, and Generally Sensitive Bytes
 use zeroize::Zeroize;
 use core::convert::TryFrom;
+use crate::can_cast_u32;
 
 macro_rules! make_buffer {
     (
@@ -16,6 +17,7 @@ macro_rules! make_buffer {
             B512([u8; 512])
         }
 
+        #[allow(clippy::len_without_is_empty)]
         impl $ident {
             #[doc = concat!("Returns `", stringify!($sensitive),"`")]
             pub const fn is_sensitive(&self) -> bool {
@@ -110,7 +112,7 @@ macro_rules! make_buffer {
 }
 
 make_buffer! {
-    #[derive(Copy, Clone, PartialEq)]
+    #[derive(Copy, Clone, PartialEq, Eq)]
     Buf,
     sensitive: false
 }
@@ -135,7 +137,7 @@ pub trait IvSize : crate::sealed::Sealed {
     /// In debug builds, this method will panic if the size is greater than `u32::MAX`.
     #[cfg_attr(not(debug_assertions), inline(always))]
     fn size_32() -> u32 {
-        debug_assert!(Self::size() <= (u32::MAX as usize), "IvSize `size` is too large.");
+        debug_assert!(can_cast_u32(Self::size()), "IvSize `size` is too large.");
         Self::size() as u32
     }
 }
@@ -226,6 +228,7 @@ macro_rules! def_nonce {
             /// This type purposefully does not derive the `Copy` trait, to ensure that nonce / IV
             /// reuse is explicit.
             #[inline]
+            #[must_use]
             pub const fn copy(&self) -> Self {
                 Self::new(self.inner)
             }

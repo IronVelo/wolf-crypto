@@ -21,7 +21,6 @@ pub(crate) unsafe fn init_aes_ctr(
     )
 }
 
-#[must_use]
 #[inline]
 pub(crate) unsafe fn create_aes_ctr(
     key: ConstPtr<Key>, iv: ConstPtr<Iv>, mode: AesM
@@ -151,19 +150,14 @@ macro_rules! impl_aes_type {
 
         impl $s_ident {
             $(#[$new_meta])*
-            $new_vis fn new(key: &Key, iv: &Iv) -> Result<Self, ()> {
-                let key_ptr = ConstPtr::new(key as *const Key);
-                let nonce_ptr = ConstPtr::new(iv as *const Iv);
+            $new_vis fn new(key: &Key, iv: &Iv) -> Result<Self, $crate::error::Unspecified> {
+                let key_ptr = ConstPtr::new(::core::ptr::from_ref(key));
+                let nonce_ptr = ConstPtr::new(::core::ptr::from_ref(iv));
 
                 unsafe {
                     let (aes_ll, res) = create_aes_ctr(key_ptr, nonce_ptr, AesM::$dir);
-                    res.unit_err_with(|| Self::with_aes(aes_ll.assume_init()))
+                    res.unit_err_with(|| Self { inner: aes_ll.assume_init() })
                 }
-            }
-
-            #[inline]
-            const fn with_aes(inner: AesLL) -> Self {
-                Self { inner }
             }
 
             impl_aes_api! {

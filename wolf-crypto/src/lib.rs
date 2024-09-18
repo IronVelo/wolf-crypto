@@ -1,6 +1,31 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, feature = "std")), no_std)]
 #![cfg_attr(not(test), no_builtins)]
+#![warn(
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::all
+)]
+// requirements for lower level things, these are all checked, just not checked in the unsafe
+// api.
+#![allow(clippy::cast_possible_truncation)]
+// stupid lint IMO
+#![allow(clippy::module_name_repetitions)]
+// always checked in safe api
+#![allow(clippy::cast_possible_wrap)]
+// this devalues things which actually require the must-use attribute
+#![allow(clippy::must_use_candidate)]
+// I am passing something which is 32 bits, so either half the size (more frequently) or the same
+// size as the reference. This lint needs to be more context aware as this is just bad.
+#![allow(clippy::needless_pass_by_value)]
+// I don't care for the assertion in my panic API where I am checking if OK. This is just for
+// more controlled error messages. Again, should be disabled
+#![allow(clippy::manual_assert)]
+// I don't need a linter lecturing me on performance
+#![allow(clippy::inline_always)]
+// I am doing constant time bitwise hacks
+#![allow(clippy::cast_sign_loss)]
+
 #[cfg(test)]
 extern crate alloc;
 
@@ -16,6 +41,8 @@ mod sealed;
 // pub mod random;
 pub mod aes;
 pub mod hash;
+mod error;
+pub use error::Unspecified;
 
 #[must_use]
 pub(crate) const fn const_can_cast_u32<const S: usize>() -> bool {

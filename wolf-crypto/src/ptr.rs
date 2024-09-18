@@ -30,7 +30,7 @@ impl<T> MutPtr<T> {
         assert!(
             !self.inner.is_null(),
             "`MutPtr` was null under safe operation, this is not allowed"
-        )
+        );
     }
 
     #[cfg(not(debug_assertions))]
@@ -126,7 +126,7 @@ impl<T> ConstPtr<T> {
         assert!(
             !self.inner.is_null(),
             "`ConstPtr` was null under safe operation, this is not allowed"
-        )
+        );
     }
 
     #[cfg(not(debug_assertions))]
