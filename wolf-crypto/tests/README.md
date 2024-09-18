@@ -1,19 +1,18 @@
 
 # Table of Contents
 
-1.  [NIST MCT and KATs](#org6fbac5b)
-    1.  [Introduction](#orgf681d30)
-    2.  [Current State](#org931588b)
-    3.  [FOSS Test Module?](#org9f8e928)
-    4.  [Requirements To Run Tests](#org708ea71)
+1.  [NIST MCT and KATs](#orge090024)
+    1.  [Introduction](#orgcf7bdaa)
+    2.  [Current State](#org2ccc43e)
+    3.  [Requirements To Run Tests](#org596eab8)
 
 
-<a id="org6fbac5b"></a>
+<a id="orge090024"></a>
 
 # NIST MCT and KATs
 
 
-<a id="orgf681d30"></a>
+<a id="orgcf7bdaa"></a>
 
 ## Introduction
 
@@ -32,16 +31,17 @@ For more information on this test suite, please see the relevant papers from NIS
 -   [The Secure Hash Algorithm Validation System (SHAVS)](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/shs/SHAVS.pdf)
 
 
-<a id="org931588b"></a>
+<a id="org2ccc43e"></a>
 
 ## Current State
 
-Currently, this test suite is not fully implemented. We have the Monte Carlo tests operational for SHA-3,
-and the Monte Carlo tests are not yet implemented for SHA as well as SHAKE.
+The test suite is almost complete, the SHAVS / SHA-3 Candidate Algorithm Submissions tests are complete for
+everything outside of `SHAKE`. 
 
-The fundamental parsers to ease loading and setting up these tests are complete, as well as the
-standard MCT parser. This parser will need to be modified for SHAKE as the format of the data is slightly
-different.
+To address `SHAKE` a new parser for it must be implemented for the MCTs and KATs, after this is complete
+implementing the tests will be straight forward. There is not much heavy lifting involved in this, but
+much work needs to be put in (in the freetime that I have) for ensuring that these tests are being performed
+**correctly**. 
 
 We have a utility for loading the necessary associated data with each test from NIST, and validators to
 ensure that all sources are truly from NIST. These run for any missing testing data, checking the
@@ -49,23 +49,14 @@ ensure that all sources are truly from NIST. These run for any missing testing d
 
 The next steps are:
 
-1.  Create SHA-1 Monte Carlo Tests
-2.  Create parser for other forms of tests
-3.  Create tests for each hashing function using aforementioned parser
-4.  Create augmented MCT parser for SHAKE
-5.  Create SHAKE MCT tests
+1.  [X] Create SHA-1 Monte Carlo Tests
+2.  [X] Create parser for other forms of tests
+3.  [X] Create tests for each hashing function using aforementioned parser
+4.  [ ] Create augmented MCT parser for SHAKE
+5.  [ ] Create SHAKE MCT tests
 
 
-<a id="org9f8e928"></a>
-
-## FOSS Test Module?
-
-Other implementations of hash functions (to the extent of my knowledge) in Rust do not leverage these
-test suites by NIST. While I am not implying any of their implementations are incorrect, the suite of
-tests and the tools we have created for running these tests could be of value to them.
-
-
-<a id="org708ea71"></a>
+<a id="org596eab8"></a>
 
 ## Requirements To Run Tests
 

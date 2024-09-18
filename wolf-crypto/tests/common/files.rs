@@ -76,6 +76,30 @@ ingest_paths! { pub SHA3_512_BIT_FILES => "sha-3-bits",
     SHA3_512ShortMsg.rsp
 }
 
+ingest_paths! { pub SHA3_224_BYTE_FILES => "sha-3-bytes",
+    SHA3_224Monte.rsp
+    SHA3_224LongMsg.rsp
+    SHA3_224ShortMsg.rsp
+}
+
+ingest_paths! { pub SHA3_256_BYTE_FILES => "sha-3-bytes",
+    SHA3_256Monte.rsp
+    SHA3_256LongMsg.rsp
+    SHA3_256ShortMsg.rsp
+}
+
+ingest_paths! { pub SHA3_384_BYTE_FILES => "sha-3-bytes",
+    SHA3_384Monte.rsp
+    SHA3_384LongMsg.rsp
+    SHA3_384ShortMsg.rsp
+}
+
+ingest_paths! { pub SHA3_512_BYTE_FILES => "sha-3-bytes",
+    SHA3_512Monte.rsp
+    SHA3_512LongMsg.rsp
+    SHA3_512ShortMsg.rsp
+}
+
 // ------------------------- SHA 1 | 2 FILES
 
 ingest_paths! { pub SHA1_BIT_FILES => "sha-bits/shabittestvectors",
@@ -115,6 +139,48 @@ ingest_paths! { pub SHA512_224_BIT_FILES => "sha-bits/shabittestvectors",
 }
 
 ingest_paths! { pub SHA512_256_BIT_FILES => "sha-bits/shabittestvectors",
+    SHA512_256Monte.rsp
+    SHA512_256ShortMsg.rsp
+    SHA512_256LongMsg.rsp
+}
+
+ingest_paths! { pub SHA1_BYTE_FILES => "sha-bytes/shabytetestvectors",
+    SHA1Monte.rsp
+    SHA1ShortMsg.rsp
+    SHA1LongMsg.rsp
+}
+
+ingest_paths! { pub SHA224_BYTE_FILES => "sha-bytes/shabytetestvectors",
+    SHA224Monte.rsp
+    SHA224ShortMsg.rsp
+    SHA224LongMsg.rsp
+}
+
+ingest_paths! { pub SHA256_BYTE_FILES => "sha-bytes/shabytetestvectors",
+    SHA256Monte.rsp
+    SHA256ShortMsg.rsp
+    SHA256LongMsg.rsp
+}
+
+ingest_paths! { pub SHA384_BYTE_FILES => "sha-bytes/shabytetestvectors",
+    SHA384Monte.rsp
+    SHA384ShortMsg.rsp
+    SHA384LongMsg.rsp
+}
+
+ingest_paths! { pub SHA512_BYTE_FILES => "sha-bytes/shabytetestvectors",
+    SHA512Monte.rsp
+    SHA512ShortMsg.rsp
+    SHA512LongMsg.rsp
+}
+
+ingest_paths! { pub SHA512_224_BYTE_FILES => "sha-bytes/shabytetestvectors",
+    SHA512_224Monte.rsp
+    SHA512_224ShortMsg.rsp
+    SHA512_224LongMsg.rsp
+}
+
+ingest_paths! { pub SHA512_256_BYTE_FILES => "sha-bytes/shabytetestvectors",
     SHA512_256Monte.rsp
     SHA512_256ShortMsg.rsp
     SHA512_256LongMsg.rsp

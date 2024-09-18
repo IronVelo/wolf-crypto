@@ -1,4 +1,4 @@
-use crate::common::parse::{take, take_ignorable, read_ident, take_until};
+use crate::common::parse::{take_ignorable, parse_assign, ignore_header};
 
 #[repr(transparent)]
 pub struct MonteTest<'t> {
@@ -7,23 +7,12 @@ pub struct MonteTest<'t> {
 
 impl<'t> MonteTest<'t> {
     pub fn new(raw: &'t [u8]) -> Self {
-        // always comments at start
-        let mut rem = take_ignorable(raw);
-
-        // then we get this [L = some size], if we don't, just continue anyway
-
-        if let Some(r) = take(b"[")(rem) {
-            rem = take_until(b']')(r).1; // ignore interior, denoted via file name
-            // take any remainder to ensure we have same perspective as if branch not taken.
-            rem = take_ignorable(rem);
-        }
-
-        Self { inner: rem }
+        Self { inner: ignore_header(raw) }
     }
 
     /// Returns seed (first elem), and the actual test
     pub fn start(self) -> (&'t [u8], ActiveMonte<'t>) {
-        let (seed, rem) = read_ident(b"Seed")(self.inner)
+        let (seed, rem) = parse_assign(b"Seed")(self.inner)
             .expect("Failed to find Seed for Monte Test");
         let rem = take_ignorable(rem);
 
@@ -54,11 +43,11 @@ impl<'t> ActiveMonte<'t> {
             return None;
         }
 
-        let (count, rem) = read_ident(b"COUNT")(rem)
-            .expect("Expected a COUNT field");
+        let (count, rem) = parse_assign(b"COUNT")(rem)
+            .expect("[PARSE] Expected a `COUNT` field.");
         let rem = take_ignorable(rem);
-        let (md, rem) = read_ident(b"MD")(rem)
-            .expect("Missing the expected output");
+        let (md, rem) = parse_assign(b"MD")(rem)
+            .expect("[PARSE] Missing the expected output (`MD` field).");
 
         Some(((count, md), rem))
     }

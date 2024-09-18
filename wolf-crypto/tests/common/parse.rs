@@ -26,7 +26,7 @@ pub fn take_ignorable(raw: &[u8]) -> &[u8] {
     }
 }
 
-pub fn take(ident: &[u8]) -> impl FnOnce(&[u8]) -> Option<&[u8]> + '_ {
+pub const fn take(ident: &[u8]) -> impl FnOnce(&[u8]) -> Option<&[u8]> + '_ {
     move |data: &[u8]| {
         if data.len() >= ident.len() && &data[..ident.len()] == ident {
             Some(&data[ident.len()..])
@@ -54,7 +54,7 @@ macro_rules! take_until {
 }
 
 #[inline]
-pub fn take_until(until: u8) -> impl FnOnce(&[u8]) -> (&[u8], &[u8]) {
+pub const fn take_until(until: u8) -> impl FnOnce(&[u8]) -> (&[u8], &[u8]) {
     move |data: &[u8]| {
         let mut pos: usize = 0;
 
@@ -76,18 +76,72 @@ pub fn take_until_break(raw: &[u8]) -> (&[u8], &[u8]) {
     take_until!(b'\n' | b'\r', raw)
 }
 
-pub fn read_ident(ident: &[u8]) -> impl FnOnce(&[u8]) -> Option<(&[u8], &[u8])> + '_ {
+#[inline]
+pub const fn parse_until_assign(ident: &[u8]) -> impl FnOnce(&[u8]) -> Option<&[u8]> + '_ {
     let take_fn = take(ident);
 
     move |data: &[u8]| {
-        let rem = take_fn(data)?;
-
-        // ignore any whitespace or whatever until eq sign
-        let rem = take_ignorable(rem);
-        let rem = take(b"=")(rem)?;
-        let rem = take_ignorable(rem);
-
-        // general format of all of these files is newline sep
-        Some(take_until_break(rem))
+        take_fn(data)
+            .map(take_ignorable)
+            .and_then(take(b"="))
+            .map(take_ignorable)
     }
+}
+
+#[inline]
+pub const fn parse_assign(ident: &[u8]) -> impl FnOnce(&[u8]) -> Option<(&[u8], &[u8])> + '_ {
+    let take_until_ass = parse_until_assign(ident);
+    move |data: &[u8]| { take_until_ass(data).map(take_until_break) }
+}
+
+#[inline]
+pub fn ignore_header(raw: &[u8]) -> &[u8] {
+    let mut rem = take_ignorable(raw);
+
+    // then we get this [L = some size], if we don't, just continue anyway
+
+    if let Some(r) = take(b"[")(rem) {
+        rem = take_until(b']')(r).1; // ignore interior, denoted via file name
+        // take any remainder to ensure we have same perspective as if branch not taken.
+        rem = take_ignorable(rem);
+    }
+
+    rem
+}
+
+#[inline]
+const fn ascii_to_digit(byte: u8) -> Option<u32> {
+    match byte {
+        b'0' => Some(0),
+        b'1' => Some(1),
+        b'2' => Some(2),
+        b'3' => Some(3),
+        b'4' => Some(4),
+        b'5' => Some(5),
+        b'6' => Some(6),
+        b'7' => Some(7),
+        b'8' => Some(8),
+        b'9' => Some(9),
+        _ => None
+    }
+}
+
+pub fn parse_u32(raw: &[u8]) -> Option<u32> {
+    if raw.is_empty() { return None }
+
+    let mut i = 0;
+    let mut num = 0;
+
+    while i < raw.len() {
+        if let Some(digit) = ascii_to_digit(raw[i]) {
+            num *= 10;
+            num += digit;
+            i += 1;
+        } else {
+            // we expect to be fed only valid numbers
+            return None
+        }
+    }
+
+    Some(num)
 }

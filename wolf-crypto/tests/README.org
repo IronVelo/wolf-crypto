@@ -18,12 +18,13 @@ For more information on this test suite, please see the relevant papers from NIS
 
 ** Current State
 
-Currently, this test suite is not fully implemented. We have the Monte Carlo tests operational for SHA-3,
-and the Monte Carlo tests are not yet implemented for SHA as well as SHAKE.
+The test suite is almost complete, the SHAVS / SHA-3 Candidate Algorithm Submissions tests are complete for
+everything outside of =SHAKE=. 
 
-The fundamental parsers to ease loading and setting up these tests are complete, as well as the
-standard MCT parser. This parser will need to be modified for SHAKE as the format of the data is slightly
-different.
+To address =SHAKE= a new parser for it must be implemented for the MCTs and KATs, after this is complete
+implementing the tests will be straight forward. There is not much heavy lifting involved in this, but
+much work needs to be put in (in the freetime that I have) for ensuring that these tests are being performed
+*correctly*. 
 
 We have a utility for loading the necessary associated data with each test from NIST, and validators to
 ensure that all sources are truly from NIST. These run for any missing testing data, checking the
@@ -31,17 +32,11 @@ ensure that all sources are truly from NIST. These run for any missing testing d
 
 The next steps are:
 
-1. Create SHA-1 Monte Carlo Tests
-2. Create parser for other forms of tests
-3. Create tests for each hashing function using aforementioned parser
-4. Create augmented MCT parser for SHAKE
-5. Create SHAKE MCT tests
-
-** FOSS Test Module?
-
-Other implementations of hash functions (to the extent of my knowledge) in Rust do not leverage these
-test suites by NIST. While I am not implying any of their implementations are incorrect, the suite of
-tests and the tools we have created for running these tests could be of value to them.
+1. [X] Create SHA-1 Monte Carlo Tests
+2. [X] Create parser for other forms of tests
+3. [X] Create tests for each hashing function using aforementioned parser
+4. [ ] Create augmented MCT parser for SHAKE
+5. [ ] Create SHAKE MCT tests
 
 ** Requirements To Run Tests
 
