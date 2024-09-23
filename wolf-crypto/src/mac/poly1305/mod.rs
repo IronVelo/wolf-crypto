@@ -17,7 +17,6 @@ use state::{Poly1305State, Init, Ready, Streaming};
 use crate::opaque_res::Res;
 use crate::{can_cast_u32, Unspecified};
 use core::marker::PhantomData;
-use zeroize::Zeroize;
 use crate::aead::Tag;
 
 macro_rules! smear {
@@ -115,6 +114,14 @@ const fn ct_add_no_wrap(a: u32, b: u32) -> (u32, Res) {
 pub struct Poly1305<State: Poly1305State = Init> {
     inner: wc_Poly1305,
     _state: PhantomData<State>
+}
+
+impl<State: Poly1305State> From<Poly1305<State>> for Unspecified {
+    #[inline]
+    fn from(value: Poly1305<State>) -> Self {
+        drop(value);
+        Unspecified
+    }
 }
 
 opaque_dbg! { Poly1305 }
@@ -379,6 +386,13 @@ pub struct StreamPoly1305 {
     accum_len: u32
 }
 
+impl From<StreamPoly1305> for Unspecified {
+    #[inline]
+    fn from(value: StreamPoly1305) -> Self {
+        value.poly1305.into()
+    }
+}
+
 opaque_dbg! { StreamPoly1305 }
 
 impl StreamPoly1305 {
@@ -460,11 +474,15 @@ impl StreamPoly1305 {
     /// ```
     /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
     ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
     /// let key: Key = [0u8; 32].into();
+    ///
     /// let tag = Poly1305::new(key.as_ref())
     ///     .update(b"chunk1")?
     ///     .update(b"chunk2")?
+    ///     .update(b"chunk3")?
     ///     .finalize()?;
+    /// # Ok(()) }
     /// ```
     pub fn finalize(self) -> Result<Tag, Unspecified> {
         finalize(Res::new(), self.poly1305, self.accum_len)

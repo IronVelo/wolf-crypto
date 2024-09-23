@@ -76,7 +76,7 @@ impl Key {
     /// let key_bytes = [0u8; 32];
     /// let key = Key::new(key_bytes);
     /// let key_ref: KeyRef = key.as_ref();
-    /// # drop(key); drop(key_ref);
+    /// # drop(key_ref); drop(key);
     /// ```
     pub const fn as_ref(&self) -> KeyRef {
         KeyRef::new(&self.inner)
@@ -154,7 +154,7 @@ impl<'r> KeyRef<'r> {
     /// let key_bytes = [2u8; 32];
     /// let key = Key::new(key_bytes);
     /// let key_ref: KeyRef = key.as_ref();
-    /// # drop(key); drop(key_ref);
+    /// # drop(key_ref); drop(key);
     /// ```
     pub const fn new(inner: &'r [u8; KEY_SIZE]) -> Self {
         Self { inner }
