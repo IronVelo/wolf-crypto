@@ -62,7 +62,9 @@ fn main() {
         .clang_arg("-DHAVE_BLAKE2B")
         .clang_arg("-DHAVE_BLAKE2S")
         .clang_arg("-DWOLFSSL_RIPEMD")
-        .clang_arg("-DHAVE_RIPEMD");
+        .clang_arg("-DHAVE_RIPEMD")
+        .clang_arg("-DHAVE_CHACHA")
+        .clang_arg("-DHAVE_POLY1305");
         //.clang_arg("-DHAVE_FIPS");
 
     // if is_x86_target() {
@@ -121,7 +123,9 @@ fn main() {
         .define("HAVE_BLAKE2S", None)
         .define("HAVE_BLAKE2B", None)
         .define("WOLFSSL_RIPEMD", None)
-        .define("HAVE_RIPEMD", None);
+        .define("HAVE_RIPEMD", None)
+        .define("HAVE_CHACHA", None)
+        .define("HAVE_POLY1305", None);
         // .define("HAVE_FIPS", None);
 
     // if is_x86_target() {
