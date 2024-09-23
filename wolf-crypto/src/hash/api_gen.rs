@@ -485,7 +485,7 @@ macro_rules! make_api {
 
                 unsafe { self.update_unchecked(data) }
             }
-
+            panic_api! {
             #[doc = concat!(
                 "Update the underlying `", stringify!($wc), "`, panicking under any failure."
             )]
@@ -518,11 +518,11 @@ macro_rules! make_api {
             #[doc = "```"]
             #[doc = ""]
             #[doc = "[`try_update`]: Self::try_update"]
-            #[cfg(feature = "panic-api")]
             #[track_caller]
             pub fn update(&mut self, data: &[u8]) {
                 self.try_update(data).unit_err(())
                     .expect(concat!("Failed to update hash in `", stringify!($name), "`"))
+            }
             }
 
             #[doc = concat!(
@@ -759,6 +759,7 @@ macro_rules! make_api {
                 self.finalize_into_exact(&mut buf).unit_err(buf)
             }
 
+            panic_api! {
             #[doc = concat!(
                 "Calls the `", stringify!($finalize), "` function, finalizing the hashing of ",
                 "data and resetting the underlying `", stringify!($wc), "` instance's state."
@@ -788,12 +789,12 @@ macro_rules! make_api {
             #[doc = "```"]
             #[doc = ""]
             #[doc = "[`try_finalize`]: Self::try_finalize"]
-            #[cfg(feature = "panic-api")]
             #[track_caller]
             pub fn finalize(&mut self) -> [u8; $bs] {
                 self.try_finalize().expect(concat!(
                     "Failed to finalize in `", stringify!($name), "`"
                 ))
+            }
             }
         }
 

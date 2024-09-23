@@ -366,6 +366,7 @@ macro_rules! blake_api {
                 unsafe { self.update_unchecked(data) }
             }
 
+            panic_api! {
             #[doc = concat!("Update the `", stringify!($name), "` instance with the provided data, panicking on failure.")]
             #[doc = ""]
             #[doc = "# Arguments"]
@@ -395,11 +396,11 @@ macro_rules! blake_api {
             #[doc = "```"]
             #[doc = ""]
             #[doc = "[`try_update`]: Self::try_update"]
-            #[cfg(feature = "panic-api")]
             #[track_caller]
             pub fn update(&mut self, data: &[u8]) {
                 self.try_update(data).unit_err(())
                     .expect(concat!("Failed to update hash in `", stringify!($name), "`"))
+            }
             }
 
             #[doc = concat!(
@@ -582,6 +583,7 @@ macro_rules! blake_api {
                 self.finalize_into_exact(&mut buf).unit_err(buf)
             }
 
+            panic_api! {
             #[doc = concat!(
                 "Finalize the `", stringify!($name),
                 "` hashing process, returning the result as an array, panicking on"
@@ -611,11 +613,11 @@ macro_rules! blake_api {
             #[doc = "```"]
             #[doc = ""]
             #[doc = "[`try_finalize`]: Self::try_finalize"]
-            #[cfg(feature = "panic-api")]
             #[track_caller]
             pub fn finalize(self) -> [u8; C] {
                 self.try_finalize()
                     .expect(concat!("Failed to finalize in `", stringify!($name), "`"))
+            }
             }
         }
 

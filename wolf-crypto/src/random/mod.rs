@@ -372,7 +372,8 @@ impl Drop for Rng {
 
             // We will debug assert this to increase our confidence in these claims post long-term
             // fuzzing.
-            debug_assert_eq!(wc_FreeRng(addr_of_mut!(self.inner)), 0);
+            let _res = wc_FreeRng(addr_of_mut!(self.inner));
+            debug_assert_eq!(_res, 0);
         }
     }
 }

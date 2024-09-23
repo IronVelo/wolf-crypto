@@ -13,13 +13,14 @@ description = "Safe and thin API for wolfSSL's wolfcrypt"
 
 [features]
 std = []
-panic-api = []
+alloc = []
+can-panic = []
 allow-non-fips = []
-default = ["panic-api", "allow-non-fips"]
+default = ["can-panic", "allow-non-fips"]
 
 [dependencies]
-wolf-crypto-sys = { version = "0.1.0-alpha.2" }
-# wolf-crypto-sys = { path = "../wolf-crypto-sys" }
+# wolf-crypto-sys = { version = "0.1.0-alpha.2" }
+wolf-crypto-sys = { path = "../wolf-crypto-sys" }
 zeroize = { version = "1.7.0" }
 
 [dev-dependencies]
@@ -47,4 +48,4 @@ harness = false
 [package.metadata.docs.rs]
 all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
-rustdoc-args = ["--cfg", "doc_cfg", "--generate-link-to-definition"]
+rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]

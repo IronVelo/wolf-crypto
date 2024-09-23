@@ -26,8 +26,9 @@
 // I am doing constant time bitwise hacks
 #![allow(clippy::cast_sign_loss)]
 
-#[cfg(test)]
+#[cfg(any(test, feature = "alloc"))]
 extern crate alloc;
+extern crate core;
 
 #[macro_use]
 mod macros;
@@ -42,6 +43,10 @@ mod sealed;
 pub mod aes;
 pub mod hash;
 mod error;
+pub mod chacha;
+pub mod aead;
+pub mod mac;
+
 pub use error::Unspecified;
 
 #[must_use]

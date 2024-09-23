@@ -1,167 +1,16 @@
-use crate::aes::{init_aes, Key};
-use crate::buf::{GenericIv};
-use core::ptr::{addr_of_mut};
-use core::ffi::{c_int};
-use wolf_crypto_sys::{Aes as AesLL, wc_AesGcmEncrypt, wc_AesGcmDecrypt, wc_AesGcmSetKey, wc_AesFree};
-use core::fmt;
+use core::ffi::c_int;
 use core::mem::MaybeUninit;
-use crate::can_cast_u32;
-use crate::error::Unspecified;
+use core::ptr::addr_of_mut;
+use wolf_crypto_sys::{
+    Aes as AesLL,
+    wc_AesFree, wc_AesGcmDecrypt, wc_AesGcmEncrypt, wc_AesGcmSetKey
+};
+use crate::buf::GenericIv;
+use crate::ptr::ConstPtr;
+use crate::{can_cast_u32, Unspecified};
+use crate::aead::{Aad, Tag};
+use crate::aes::{init_aes, Key};
 use crate::opaque_res::Res;
-use crate::ptr::{ConstPtr};
-
-/// Represents an AES-GCM (Galois/Counter Mode) instance.
-#[repr(transparent)]
-pub struct AesGcm {
-    inner: AesLL,
-}
-
-/// Represents Additional Authenticated Data (AAD) for AES-GCM operations.
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct Aad<'s> {
-    inner: Option<&'s [u8]>
-}
-
-#[inline]
-#[must_use]
-const fn to_u32(num: usize) -> Option<u32> {
-    if can_cast_u32(num) {
-        Some(num as u32)
-    } else {
-        None
-    }
-}
-
-impl<'s> Aad<'s> {
-    /// An empty AAD.
-    pub const EMPTY: Self = Self { inner: None };
-
-    /// Create a new AAD instance from a byte slice.
-    pub const fn new(aad: &'s [u8]) -> Self {
-        Self { inner: Some(aad) }
-    }
-
-    /// Pointer may be null of the option was None
-    #[inline]
-    pub(crate) const fn ptr(&self) -> *const u8 {
-        match self.inner {
-            Some(inner) => inner.as_ptr(),
-            None => core::ptr::null()
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    #[track_caller]
-    #[inline]
-    #[must_use]
-    pub(crate) fn size(&self) -> u32 {
-        assert!(self.is_valid_size());
-        self.inner.map_or(0, |inner| inner.len() as u32)
-    }
-
-    #[cfg(not(debug_assertions))]
-    #[inline]
-    #[must_use]
-    pub(crate) const fn size(&self) -> u32 {
-        match self.inner {
-            Some(inner) => inner.len() as u32,
-            None => 0
-        }
-    }
-
-    #[inline(always)]
-    #[must_use]
-    pub const fn try_size(&self) -> Option<u32> {
-        match self.inner {
-            None => Some(0),
-            Some(val) => to_u32(val.len())
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub const fn is_valid_size(&self) -> bool {
-        match self.inner {
-            Some(inner) => can_cast_u32(inner.len()),
-            None => true
-        }
-    }
-}
-
-/// Represents the authentication tag produced by AES-GCM encryption.
-#[must_use = "You must use the tag, or GCM is doing nothing for you"]
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct Tag {
-    inner: [u8; 16],
-}
-
-impl fmt::Debug for Tag {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_fmt(format_args!("Tag({:?})", &self.inner))
-    }
-}
-
-impl Tag {
-    /// The size of the authentication tag in bytes.
-    pub const CAPACITY: usize = 16;
-
-    /// Creates a new `Tag` instance from a 16-byte array.
-    ///
-    /// # Arguments
-    ///
-    /// * `inner` - A 16-byte array containing the authentication tag.
-    ///
-    /// # Returns
-    ///
-    /// A new `Tag` instance.
-    pub const fn new(inner: [u8; Self::CAPACITY]) -> Self {
-        Self { inner }
-    }
-
-    /// Creates a new `Tag` instance filled with zeros.
-    ///
-    /// This is typically used to create a tag buffer that will be filled
-    /// by an encryption operation.
-    ///
-    /// # Returns
-    ///
-    /// A new `Tag` instance with all bytes set to zero.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use wolf_crypto::aes::gcm::Tag;
-    ///
-    /// let tag = Tag::new_zeroed();
-    /// assert_eq!(tag.as_slice(), &[0u8; 16]);
-    /// ```
-    pub const fn new_zeroed() -> Self {
-        Self::new([0u8; Self::CAPACITY])
-    }
-
-    /// Consumes the `Tag` and returns the underlying 16-byte array.
-    #[inline]
-    pub const fn take(self) -> [u8; Self::CAPACITY] {
-        self.inner
-    }
-
-    /// Returns a reference to the tag as a byte slice.
-    pub const fn as_slice(&self) -> &[u8] {
-        self.inner.as_slice()
-    }
-
-    #[inline]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.inner.as_mut_ptr()
-    }
-
-    #[inline]
-    pub(crate) const fn as_ptr(&self) -> *const u8 {
-        self.inner.as_ptr()
-    }
-}
 
 #[inline(always)]
 #[must_use]
@@ -171,6 +20,12 @@ pub(crate) unsafe fn aes_set_key(aes: *mut AesLL, key: ConstPtr<Key>) -> c_int {
         key.as_slice().as_ptr(),
         key.capacity() as u32
     )
+}
+
+/// Represents an AES-GCM (Galois/Counter Mode) instance.
+#[repr(transparent)]
+pub struct AesGcm {
+    inner: AesLL,
 }
 
 impl AesGcm {
@@ -226,9 +81,10 @@ impl AesGcm {
     /// assert_ne!(input, output);
     /// ```
     #[inline]
-    pub fn encrypt_sized<const C: usize, N: GenericIv>(
-        &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: Aad
+    pub fn encrypt_sized<const C: usize, N: GenericIv, A: Aad>(
+        &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: A
     ) -> Result<Tag, Unspecified> {
+        if !aad.is_valid_size() { return Err(Unspecified) }
         unsafe {
             // SAFETY:
             //
@@ -242,7 +98,7 @@ impl AesGcm {
 
     #[inline]
     #[must_use]
-    const fn arg_predicate(input: &[u8], output: &[u8], aad: Aad) -> bool {
+    fn arg_predicate<A: Aad>(input: &[u8], output: &[u8], aad: &A) -> bool {
         input.len() <= output.len()
             && can_cast_u32(input.len())
             && aad.is_valid_size()
@@ -284,12 +140,10 @@ impl AesGcm {
     /// assert_ne!(input, output);
     /// ```
     #[inline]
-    pub fn try_encrypt<N: GenericIv>(
-        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad
+    pub fn try_encrypt<N: GenericIv, A: Aad>(
+        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: A
     ) -> Result<Tag, Unspecified> {
-        if !Self::arg_predicate(input, output, aad) {
-            return Err(Unspecified)
-        }
+        if !Self::arg_predicate(input, output, &aad) { return Err(Unspecified) }
 
         unsafe {
             // SAFETY:
@@ -339,15 +193,15 @@ impl AesGcm {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn encrypt<N: GenericIv>(
-        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad
+    pub fn encrypt<N: GenericIv, A: Aad>(
+        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: A
     ) -> Tag {
         self.try_encrypt(nonce, input, output, aad).unwrap()
     }
     }
 
-    pub unsafe fn encrypt_unchecked(
-        &mut self, nonce: &[u8], input: &[u8], output: &mut [u8], aad: Aad
+    pub(crate) unsafe fn encrypt_unchecked<A: Aad>(
+        &mut self, nonce: &[u8], input: &[u8], output: &mut [u8], aad: A
     ) -> Result<Tag, Unspecified> {
         let mut tag = Tag::new_zeroed();
         let mut res = Res::new();
@@ -404,9 +258,10 @@ impl AesGcm {
     /// assert_eq!(plaintext, decrypted);
     /// ```
     #[inline]
-    pub fn decrypt_sized<const C: usize, N: GenericIv>(
-        &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: Aad, tag: &Tag
+    pub fn decrypt_sized<const C: usize, N: GenericIv, A: Aad>(
+        &mut self, nonce: N, input: &[u8; C], output: &mut [u8; C], aad: A, tag: &Tag
     ) -> Res {
+        if !aad.is_valid_size() { return Res::ERR }
         unsafe {
             // SAFETY:
             //
@@ -464,12 +319,10 @@ impl AesGcm {
     /// assert_eq!(plaintext, decrypted);
     /// ```
     #[inline]
-    pub fn try_decrypt<N: GenericIv>(
-        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad, tag: &Tag
+    pub fn try_decrypt<N: GenericIv, A: Aad>(
+        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: A, tag: &Tag
     ) -> Res {
-        if !Self::arg_predicate(input, output, aad) {
-            return Res::ERR;
-        }
+        if !Self::arg_predicate(input, output, &aad) { return Res::ERR }
 
         unsafe {
             // SAFETY:
@@ -519,8 +372,8 @@ impl AesGcm {
     /// ```
     #[inline]
     #[track_caller]
-    pub fn decrypt<N: GenericIv>(
-        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: Aad, tag: &Tag
+    pub fn decrypt<N: GenericIv, A: Aad>(
+        &mut self, nonce: N, input: &[u8], output: &mut [u8], aad: A, tag: &Tag
     ) {
         if self.try_decrypt(nonce, input, output, aad, tag).is_err() {
             panic!("Decryption failed")
@@ -528,8 +381,8 @@ impl AesGcm {
     }
     }
 
-    pub unsafe fn decrypt_unchecked(
-        &mut self, nonce: &[u8], input: &[u8], output: &mut [u8], aad: Aad, tag: &Tag
+    pub(crate) unsafe fn decrypt_unchecked<A: Aad>(
+        &mut self, nonce: &[u8], input: &[u8], output: &mut [u8], aad: A, tag: &Tag
     ) -> Res {
         let mut res = Res::new();
 
@@ -652,6 +505,7 @@ mod tests {
     use aes_gcm::{Aes256Gcm, KeyInit};
     use aes_gcm::aead::{Aead};
     use aes_gcm::aead::consts::{U12, U16};
+    use crate::aead::AadSlice;
     use crate::buf::{Iv, Nonce};
 
     fn encrypt_rust_crypto(key: &[u8], nonce: &[u8], plaintext: &[u8]) -> (Vec<u8>, Tag) {
@@ -704,7 +558,7 @@ mod tests {
         let mut out_buf = [0u8; S];
         let key = Key::Aes256([7; 32]);
         let nonce = Nonce::new([3; 12]);
-        let aad = Aad::EMPTY;
+        let aad = AadSlice::EMPTY;
 
         let tag = AesGcm::new(&key)
             .unwrap()
@@ -742,7 +596,7 @@ mod tests {
 
         let key = Key::Aes256([7; 32]);
         let nonce = Nonce::new([3; 12]);
-        let aad = Aad::EMPTY;
+        let aad = AadSlice::EMPTY;
 
         let mut aes = AesGcm::new(&key).unwrap();
 
@@ -765,7 +619,7 @@ mod tests {
 
         let key = Key::Aes256([7; 32]);
         let nonce = Nonce::new([3; 12]);
-        let aad = Aad::EMPTY;
+        let aad = AadSlice::EMPTY;
 
         let mut aes = AesGcm::new(&key).unwrap();
 
@@ -798,7 +652,7 @@ mod tests {
 
         let key = Key::Aes256([7; 32]);
         let nonce = Iv::new([3; 16]);
-        let aad = Aad::EMPTY;
+        let aad = AadSlice::EMPTY;
 
         let mut aes = AesGcm::new(&key).unwrap();
 
@@ -821,7 +675,7 @@ mod tests {
             81, 87, 13, 115, 13, 165
         ]);
         let nonce = Nonce::new([73, 54, 180, 151, 137, 229, 233, 133, 150, 169, 13, 99]);
-        let aad = Aad::EMPTY;
+        let aad = AadSlice::EMPTY;
         let mut aes = AesGcm::new(&key).unwrap();
 
         for i in 0..255u8 {
@@ -853,6 +707,7 @@ mod tests {
 #[cfg(all(test, not(miri)))]
 mod property_tests {
     use proptest::prelude::*;
+    use crate::aead::AadSlice;
     use super::*;
     use crate::aes::test_utils::*;
     use super::gcm_test_utils::{encrypt_rust_crypto, decrypt_rust_crypto};
@@ -870,7 +725,7 @@ mod property_tests {
             let mut output = BoundList::<1028>::new_zeroes(input.len());
 
             let mut aes = AesGcm::new(&key).unwrap();
-            let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
+            let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), AadSlice::EMPTY);
 
             // 1 byte the probability of a specific key and nonce that retains equivalent plaintext
             // in ciphertext is too high. see the always_equal test for a nice example of this.
@@ -879,7 +734,7 @@ mod property_tests {
             }
 
             let mut plain = BoundList::<1028>::new_zeroes(input.len());
-            aes.decrypt(nonce.copy(), output.as_slice(), plain.as_mut_slice(), Aad::EMPTY, &tag);
+            aes.decrypt(nonce.copy(), output.as_slice(), plain.as_mut_slice(), AadSlice::EMPTY, &tag);
 
             prop_assert_eq!(plain.as_slice(), input.as_slice());
         }
@@ -899,7 +754,7 @@ mod property_tests {
 
             let mut plain = BoundList::<1028>::new_zeroes(input.len());
             AesGcm::new(&key).unwrap()
-                .decrypt(nonce, cipher.as_slice(), plain.as_mut_slice(), Aad::EMPTY, &tag);
+                .decrypt(nonce, cipher.as_slice(), plain.as_mut_slice(), AadSlice::EMPTY, &tag);
 
             prop_assert_eq!(plain, input);
         }
@@ -913,7 +768,7 @@ mod property_tests {
             let mut output = BoundList::<1028>::new_zeroes(input.len());
 
             let mut aes = AesGcm::new(&key).unwrap();
-            let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
+            let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), AadSlice::EMPTY);
 
             // 1 byte the probability of a specific key and nonce that retains equivalent plaintext
             // in ciphertext is too high. see the always_equal test for a nice example of this.

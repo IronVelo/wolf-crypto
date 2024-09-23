@@ -105,6 +105,12 @@ impl Key {
     }
 }
 
+impl Zeroize for Key {
+    fn zeroize(&mut self) {
+        self.zero()
+    }
+}
+
 impl Drop for Key {
     /// Zeroes the underlying key material.
     fn drop(&mut self) {
@@ -144,7 +150,7 @@ impl AesM {
 
     #[inline]
     pub const fn mode(&self) -> core::ffi::c_uint {
-        unsafe { core::mem::transmute_copy(self) }
+        self.mode
     }
 }
 

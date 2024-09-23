@@ -12,6 +12,110 @@ Currently, the =hash= module is the most tested segment of this codebase, outsid
 I personally would not be comfortable using anything in a general purpose application (not any of my professional
 work in security).
 
+* Testing
+
+Despite not implementing cryptography by hand, this library deals with cryptography and FFI (involving =unsafe= code).
+Consequently, comprehensive testing is crucial. Although still in alpha, we maintain an extensive test suite:
+
+** Current Test Suite
+
+*** Unit Tests
+
+- Check edge cases
+- Ensure behavior equivalent to robust implementations (e.g., =rust-crypto=) under these edge cases.
+
+*** Property Tests
+
+- Verify expected properties (e.g., encryption bijectivity).
+- Confirm documented properties.
+- Compare against robust implementations for equivalence.
+
+*** NIST CSRC CAVP Tests
+
+- Implemented for hashing functions (current or previously NIST-recommended).
+- Includes:
+  - Monte-Carlo tests.
+  - Known Answer tests (short and long datasets).
+
+*** Official KATs (Known Answer Tests)
+
+- Used for algorithms not covered by NIST CAVP.
+- Example: BLAKE2 algorithm.
+
+** Goals and Approach
+
+- Aim for production-ready robustness by first minor release.
+- Design as a thin, type-safe, and memory-safe wrapper around FIPS 140-3 certified =wolfcrypt=.
+- Careful to avoid introducing security risks.
+- Enforce secure programming practices (e.g., prompt zeroing of secrets from memory).
+
+** Comparison with =wolfcrypt=
+
+- =wolfcrypt= has undergone necessary testing and validation for FIPS 140-3 certification.
+- We apply rigorous testing to our abstraction layer.
+- Ensure we don't inadvertently violate underlying certified properties.
+- Build confidence through equivalence testing with other Rust cryptography projects.
+
+** Formal Verification Considerations
+
+- Not formally verified due to impracticality with current Rust tools and FFI.
+- Formal verification is rare but highly valuable for ensuring correctness.
+- Attempting to formally verify our API would have minimal benefits due to necessary assumptions about =wolfcrypt=.
+
+*** Current Tools and Limitations
+
+**** =Prusti=
+
+- Handling of lifetimes is practically non-existent.
+- Viper framework struggles with prophecies.
+- Workaround: Creating assumed-correct functions that =snap= underlying data, stripping lifetimes.
+
+**** =Creusot=
+
+- Built on Why3 with comma lang.
+- Excellent handling of lifetimes using prophecies (based on Martín Abadi and Leslie Lamport's work).
+- Challenges:
+  - Installation can be difficult (script issues, manual installation sometimes necessary).
+  - Requires nightly Rust, even when not verifying specifications.
+  - Necessitates conditional compilation for everything.
+
+**** =Kani=
+
+- Less rigorous than =Prusti= or =Creusot=, but useful for libraries lacking formal verification.
+- Currently lacks proper FFI support, limiting its applicability to this crate.
+- This crate implements =Kani='s =Arbitrary= trait for certain types.
+- Some =proofs= using =Kani= are included, anticipating future improvements in FFI support.
+
+*** Future Prospects
+
+- Formal verification tools in Rust are promising but still in early stages.
+- As tools improve, particularly in handling FFI, more comprehensive verification may become feasible.
+- Continuous monitoring of advancements in formal verification for Rust.
+
+*** Important Note on Limitations
+
+Even with potential future formal verification of our API, it would not constitute complete formal verification
+as =wolfcrypt=, the underlying cryptographic module, is not formally verified. True formal guarantees would
+require formal verification of both our API and the underlying =wolfcrypt= implementation.
+
+** Future Enhancements
+
+*** Constant-time Behavior Testing
+
+- Challenge: High-level abstraction introduces noise in black-box testing.
+- Considerations:
+  - =wolfcrypt='s cryptography implementation is constant-time.
+  - Public API includes non-constant-time checks.
+- Potential approaches:
+  - Manual review of assembly.
+  - High-level taint analysis (challenging across FFI).
+- Importance: Preventing information leakage.
+
+*** Expanded Test Coverage
+
+- Focus on security properties beyond traditional code coverage.
+- Implement more sophisticated constant-time behavior tests when feasible.
+
 * Current Priorities
 
 - Focus on implementing and stabilizing the core FIPS 140-3 compatible algorithms.

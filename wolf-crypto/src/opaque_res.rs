@@ -5,6 +5,7 @@
 //! accumulation of error states without revealing specific error details.
 use core::ffi::c_int;
 use crate::error::Unspecified;
+use core::fmt;
 
 /// An opaque result type for error handling without exposing error details.
 ///
@@ -12,7 +13,13 @@ use crate::error::Unspecified;
 /// specific error information. It only indicates success or failure.
 #[must_use = "You must handle the potential error"]
 #[repr(transparent)]
-pub struct Res(bool);
+pub struct Res(pub(crate) bool);
+
+impl fmt::Debug for Res {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("Res {{ is_ok: {} }}", self.0 as u8))
+    }
+}
 
 impl Default for Res {
     #[inline]
@@ -32,9 +39,7 @@ impl Res {
     /// # Returns
     ///
     /// A new `Res` instance representing success.
-    pub const fn new() -> Self {
-        Self::OK
-    }
+    pub const fn new() -> Self { Self::OK }
 
     /// Checks if the result is OK (successful).
     ///
@@ -68,7 +73,6 @@ impl Res {
     pub fn check(&mut self, res: bool) {
         self.0 &= res;
     }
-
 
     /// Ensures that a C integer result is equal to 1.
     ///

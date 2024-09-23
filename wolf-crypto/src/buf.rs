@@ -286,6 +286,42 @@ def_nonce!(Nonce, U12);
 def_nonce!(Nonce16, U16);
 def_nonce!(Iv, U16);
 
+impl<'r> GenericIv for &'r [u8; 12] {
+    type Size = U12;
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        *self
+    }
+}
+
+impl GenericIv for [u8; 12] {
+    type Size = U12;
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        *&self
+    }
+}
+
+impl<'r> GenericIv for &'r [u8; 16] {
+    type Size = U16;
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        *self
+    }
+}
+
+impl GenericIv for [u8; 16] {
+    type Size = U16;
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        *&self
+    }
+}
+
 /// A trait for types that represent byte arrays.
 pub trait ByteArray {
     /// The target type of the byte array.

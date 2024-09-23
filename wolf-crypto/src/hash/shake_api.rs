@@ -205,6 +205,7 @@ macro_rules! shake_api {
                 unsafe { self.update_unchecked(data) }
             }
 
+            panic_api! {
             #[doc = concat!(
                 "Update the underlying `", stringify!($wc), "`, panicking under any failure."
             )]
@@ -237,11 +238,11 @@ macro_rules! shake_api {
             #[doc = "```"]
             #[doc = ""]
             #[doc = "[`try_update`]: Self::try_update"]
-            #[cfg(feature = "panic-api")]
             #[track_caller]
             pub fn update(&mut self, data: &[u8]) {
                 self.try_update(data).unit_err(())
                     .expect(concat!("Failed to update hash in `", stringify!($name), "`"))
+            }
             }
 
             #[doc = concat!(
@@ -444,6 +445,7 @@ macro_rules! shake_api {
                 self.try_finalize::<{ $ds }>()
             }
 
+            panic_api! {
             #[doc = concat!(
                 "Calls the `", stringify!($finalize), "` function, finalizing the extensible ",
                 "hashing of data and resetting the underlying `", stringify!($wc),
@@ -471,12 +473,12 @@ macro_rules! shake_api {
             #[doc = ""]
             #[doc = "[`try_finalize`]: Self::try_finalize"]
             #[doc = "[`finalize_into`]: Self::finalize_into"]
-            #[cfg(feature = "panic-api")]
             #[track_caller]
             pub fn finalize<const C: usize>(&mut self) -> [u8; C] {
                 self.try_finalize::<{ C }>().expect(concat!(
                     "Failed to finalize in `", stringify!($name), "`"
                 ))
+            }
             }
         }
 

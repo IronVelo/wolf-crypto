@@ -100,12 +100,13 @@ macro_rules! impl_aes_api {
             }
         }
 
-        #[cfg(feature = "panic-api")]
+        panic_api! {
         $(#[$panics_meta])*
         pub fn $panics_ident(&mut self, input: &[u8], output: &mut [u8]) {
             if self.$try_ident(input, output).is_err() {
                 panic!("Failed to apply keystream");
             }
+        }
         }
 
         $(#[$ll_meta])*
