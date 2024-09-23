@@ -1,6 +1,6 @@
 [package]
 name = "wolf-crypto"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 edition = "2021"
 license = "GPL-2.0-only"
 categories = ["no-std", "cryptography"]
@@ -19,8 +19,8 @@ allow-non-fips = []
 default = ["can-panic", "allow-non-fips"]
 
 [dependencies]
-# wolf-crypto-sys = { version = "0.1.0-alpha.2" }
-wolf-crypto-sys = { path = "../wolf-crypto-sys" }
+wolf-crypto-sys = { version = "0.1.0-alpha.3" }
+# wolf-crypto-sys = { path = "../wolf-crypto-sys" }
 zeroize = { version = "1.7.0" }
 
 [dev-dependencies]
