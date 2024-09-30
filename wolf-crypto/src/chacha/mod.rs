@@ -42,7 +42,7 @@ macro_rules! impl_fmt {
 ///
 /// # Warning
 ///
-/// `ChaCha20` alone does not ensure that ciphertexts is authentic, unless you have a reason
+/// `ChaCha20` alone does not ensure that the ciphertext is authentic, unless you have a reason
 /// for using this directly, it is generally recommended to use `ChaCha20-Poly1305`.
 ///
 /// # Generic `S`
