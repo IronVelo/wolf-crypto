@@ -31,7 +31,7 @@ macro_rules! alloc {
     ($($item:item)*) => {
         $(
             #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-            #[cfg(feature = "alloc")]
+            #[cfg(any(feature = "alloc", test))]
             $item
         )*
     };
@@ -96,5 +96,28 @@ macro_rules! define_state {
                 $name
             }
         )*
+    };
+}
+
+macro_rules! arb_key {
+    (struct $ident:ident :: $construct:ident ([u8; $sz:literal])) => {
+        #[cfg(test)]
+        impl ::proptest::arbitrary::Arbitrary for $ident {
+            type Parameters = ();
+
+            fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+                use ::proptest::strategy::Strategy as _;
+                ::proptest::prelude::any::<[u8; $sz]>().prop_map(Self::$construct).boxed()
+            }
+
+            type Strategy = ::proptest::strategy::BoxedStrategy<Self>;
+        }
+
+        #[cfg(kani)]
+        impl ::kani::Arbitrary for $ident {
+            fn any() -> Self {
+                Self::$construct(::kani::any())
+            }
+        }
     };
 }

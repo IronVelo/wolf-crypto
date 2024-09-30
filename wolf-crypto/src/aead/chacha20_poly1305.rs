@@ -45,8 +45,9 @@ fn oneshot_predicate<A: Aad>(plain: &[u8], out: &[u8], aad: &A) -> bool {
 }
 
 pub fn encrypt<K, IV, A>(
-    key: K, iv: IV, aad: A,
-    plain: &[u8], out: &mut [u8]
+    key: K, iv: IV,
+    plain: &[u8], out: &mut [u8],
+    aad: A
 ) -> Result<Tag, Unspecified>
     where
         K: GenericKey,
@@ -73,7 +74,7 @@ pub fn encrypt<K, IV, A>(
     res.unit_err(tag)
 }
 
-pub fn encrypt_in_place<K, IV, A>(key: K, iv: IV, aad: A, in_out: &mut [u8]) -> Result<Tag, Unspecified>
+pub fn encrypt_in_place<K, IV, A>(key: K, iv: IV, in_out: &mut [u8], aad: A) -> Result<Tag, Unspecified>
     where
         K: GenericKey,
         IV: GenericIv<Size = U12>,
@@ -100,9 +101,9 @@ pub fn encrypt_in_place<K, IV, A>(key: K, iv: IV, aad: A, in_out: &mut [u8]) -> 
 }
 
 pub fn decrypt<K, IV, A>(
-    key: K, iv: IV, aad: A,
+    key: K, iv: IV,
     cipher: &[u8], out: &mut [u8],
-    tag: Tag
+    aad: A, tag: Tag
 ) -> Result<(), Unspecified>
     where
         K: GenericKey,
@@ -129,9 +130,9 @@ pub fn decrypt<K, IV, A>(
 }
 
 pub fn decrypt_in_place<K, IV, A>(
-    key: K, iv: IV, aad: A,
+    key: K, iv: IV,
     in_out: &mut [u8],
-    tag: Tag
+    aad: A, tag: Tag
 ) -> Result<(), Unspecified>
 where
     K: GenericKey,
@@ -331,29 +332,181 @@ impl<S: Updating> ChaCha20Poly1305<S> {
 #[cfg(test)]
 mod tests {
     use crate::mac::poly1305::Key;
+    use core::{
+        slice,
+        ptr
+    };
     use super::*;
 
     #[test]
-    fn type_masturbation() {
+    fn type_state_machine() {
         let key = Key::new([0u8; 32]);
 
-        let mut cipher = [69,69,69,69];
+        let mut cipher = [69, 69, 69, 69];
 
         let tag = ChaCha20Poly1305::new::<Encrypt>(key.as_ref(), [0u8; 12])
             .set_aad(Some(Some(Some(())))).unwrap()
-            .update_in_place(cipher.as_mut_slice())
-            .unwrap()
-            .finalize()
-            .unwrap();
+            .update_in_place(cipher.as_mut_slice()).unwrap()
+            .finalize().unwrap();
 
         let new_tag = ChaCha20Poly1305::new::<Decrypt>(key.as_ref(), [0u8; 12])
             .set_aad(()).unwrap()
-            .update_in_place(cipher.as_mut_slice())
-            .unwrap()
-            .finalize()
-            .unwrap();
+            .update_in_place(cipher.as_mut_slice()).unwrap()
+            .finalize().unwrap();
 
         assert_eq!(tag, new_tag);
         assert_eq!(cipher, [69, 69, 69, 69]);
+    }
+
+    macro_rules! bogus_slice {
+        ($size:expr) => {{
+            let src = b"hello world";
+            unsafe { slice::from_raw_parts(src.as_ptr(), $size) }
+        }};
+    }
+
+    #[test]
+    fn oneshot_size_predicate_fail() {
+        // I am not allocating the maximum number for u32
+        let slice = bogus_slice!(u32::MAX as usize + 1);
+        let out = slice;
+        assert!(!oneshot_predicate(slice, out, &()))
+    }
+
+    #[test]
+    fn oneshot_size_predicate() {
+        let slice = bogus_slice!(u32::MAX as usize - 1);
+        let out = slice;
+        assert!(oneshot_predicate(slice, out, &()))
+    }
+
+    #[test]
+    fn oneshot_size_predicate_too_small_out() {
+        let slice = bogus_slice!(u32::MAX as usize - 1);
+        let out = bogus_slice!(u32::MAX as usize - 2);
+        assert!(!oneshot_predicate(slice, out, &()));
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use crate::aes::test_utils::{BoundList};
+    use crate::buf::Nonce;
+    use crate::mac::poly1305::Key;
+    use proptest::{prelude::*, proptest};
+
+    proptest! {
+        // these take some time. I ran with 50k cases once, but I cannot wait for these to pass
+        // each time I run the tests.
+        #![proptest_config(ProptestConfig::with_cases(5_000))]
+
+        #[test]
+        fn bijectivity(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>()
+        ) {
+            let mut output = input.create_self();
+            let tag = ChaCha20Poly1305::new::<Encrypt>(key.as_ref(), iv.copy())
+                .update(input.as_slice(), output.as_mut_slice()).unwrap()
+                .finalize().unwrap();
+
+            if output.len() >= 6 {
+                prop_assert_ne!(output.as_slice(), input.as_slice());
+            }
+
+            let mut decrypted = output.create_self();
+            let d_tag = ChaCha20Poly1305::new::<Decrypt>(key.as_ref(), iv)
+                .update(output.as_slice(), decrypted.as_mut_slice()).unwrap()
+                .finalize().unwrap();
+
+            prop_assert_eq!(tag, d_tag);
+            prop_assert_eq!(decrypted.as_slice(), input.as_slice());
+        }
+
+        #[test]
+        fn bijectivity_with_aad(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>(),
+            aad in any::<Option<String>>()
+        ) {
+            let mut output = input.create_self();
+            let tag = ChaCha20Poly1305::new::<Encrypt>(key.as_ref(), iv.copy())
+                .set_aad(aad.as_ref()).unwrap()
+                .update(input.as_slice(), output.as_mut_slice()).unwrap()
+                .finalize().unwrap();
+
+            if output.len() >= 6 {
+                prop_assert_ne!(output.as_slice(), input.as_slice());
+            }
+
+            let mut decrypted = output.create_self();
+            let d_tag = ChaCha20Poly1305::new::<Decrypt>(key.as_ref(), iv)
+                .set_aad(aad.as_ref()).unwrap()
+                .update(output.as_slice(), decrypted.as_mut_slice()).unwrap()
+                .finalize().unwrap();
+
+            prop_assert_eq!(tag, d_tag);
+            prop_assert_eq!(decrypted.as_slice(), input.as_slice());
+        }
+
+        #[test]
+        fn oneshot_bijectivity(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>()
+        ) {
+            let mut output = input.create_self();
+
+            let tag = encrypt(
+                key.as_ref(), iv.copy(),
+                input.as_slice(), output.as_mut_slice(),
+                ()
+            ).unwrap();
+
+            if output.len() >= 6 {
+                prop_assert_ne!(output.as_slice(), input.as_slice());
+            }
+
+            let mut decrypted = output.create_self();
+            prop_assert!(decrypt(
+                key.as_ref(), iv,
+                output.as_slice(), decrypted.as_mut_slice(),
+                (), tag
+            ).is_ok());
+
+            prop_assert_eq!(input.as_slice(), decrypted.as_slice());
+        }
+
+        #[test]
+        fn oneshot_bijectivity_with_aad(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>(),
+            aad in any::<Option<String>>()
+        ) {
+            let mut output = input.create_self();
+
+            let tag = encrypt(
+                key.as_ref(), iv.copy(),
+                input.as_slice(), output.as_mut_slice(),
+                aad.as_ref()
+            ).unwrap();
+
+            if output.len() >= 6 {
+                prop_assert_ne!(output.as_slice(), input.as_slice());
+            }
+
+            let mut decrypted = output.create_self();
+            prop_assert!(decrypt(
+                key.as_ref(), iv,
+                output.as_slice(), decrypted.as_mut_slice(),
+                aad.as_ref(), tag
+            ).is_ok());
+
+            prop_assert_eq!(input.as_slice(), decrypted.as_slice());
+        }
     }
 }

@@ -42,6 +42,8 @@ pub struct Key {
     inner: [u8; KEY_SIZE]
 }
 
+arb_key! { struct Key::new([u8; 32]) }
+
 impl Key {
     /// Creates a new `Key` from a 32-byte array.
     ///

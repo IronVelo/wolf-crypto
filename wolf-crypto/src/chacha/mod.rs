@@ -471,7 +471,7 @@ impl ChaCha20<Ready> {
     /// A `Result` containing either a tuple of the ciphertext vector and the `ChaCha20`
     /// instance in the `NeedsIv` state on success, or the original instance on failure.
     pub fn encrypt(
-        mut self,
+        self,
         plain: &[u8]
     ) -> Result<(alloc::vec::Vec<u8>, ChaCha20<NeedsIv>), Self> {
         let mut output = alloc::vec![0u8; plain.len()];
