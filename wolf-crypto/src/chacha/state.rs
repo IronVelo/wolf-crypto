@@ -3,31 +3,6 @@ use crate::sealed::Sealed;
 pub trait State: Sealed {}
 pub trait CanProcess: State {}
 
-macro_rules! define_state {
-    (
-        $(#[$meta:meta])*
-        $name:ident
-    ) => {
-        $(#[$meta])*
-        pub struct $name;
-
-        impl Sealed for $name {}
-        impl State for $name {}
-    };
-
-    ($(
-        $(#[$meta:meta])*
-        $name:ident
-    ),* $(,)?) => {
-        $(
-            define_state! {
-                $(#[$meta])*
-                $name
-            }
-        )*
-    };
-}
-
 define_state! {
     /// The ingress state for `ChaCha`, where the key is set and the instance is constructed.
     Init,

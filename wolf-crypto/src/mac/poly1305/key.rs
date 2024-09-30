@@ -55,7 +55,7 @@ impl Key {
     /// use wolf_crypto::mac::poly1305::Key;
     ///
     /// let key_bytes = [0u8; 32];
-    /// let key = Key::new(key_bytes);
+    /// let key = Key::new(key_bytes,);
     /// # drop(key);
     /// ```
     pub const fn new(inner: [u8; KEY_SIZE]) -> Self {
@@ -74,7 +74,7 @@ impl Key {
     /// use wolf_crypto::mac::poly1305::{Key, KeyRef};
     ///
     /// let key_bytes = [0u8; 32];
-    /// let key = Key::new(key_bytes);
+    /// let key = Key::new(key_bytes,);
     /// let key_ref: KeyRef = key.as_ref();
     /// # drop(key_ref); drop(key);
     /// ```
@@ -121,7 +121,7 @@ impl From<[u8; KEY_SIZE]> for Key {
     /// ```
     #[inline]
     fn from(value: [u8; KEY_SIZE]) -> Self {
-        Self::new(value)
+        Self::new(value, )
     }
 }
 
@@ -152,7 +152,7 @@ impl<'r> KeyRef<'r> {
     /// use wolf_crypto::mac::poly1305::{Key, KeyRef};
     ///
     /// let key_bytes = [2u8; 32];
-    /// let key = Key::new(key_bytes);
+    /// let key = Key::new(key_bytes,);
     /// let key_ref: KeyRef = key.as_ref();
     /// # drop(key_ref); drop(key);
     /// ```
@@ -176,7 +176,7 @@ impl<'r> KeyRef<'r> {
     /// # drop(key_ref); drop(owned_key);
     /// ```
     pub const fn copy(&self) -> Key {
-        Key::new(*self.inner)
+        Key::new(*self.inner, )
     }
 }
 

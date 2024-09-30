@@ -1,4 +1,4 @@
-use crate::can_cast_u32;
+use crate::{can_cast_u32, to_u32};
 use crate::sealed::Sealed;
 use core::fmt;
 
@@ -14,6 +14,7 @@ pub unsafe trait Aad: Sealed {
     ///   If no AAD is being provided, the returned length should **always** be zero. `None` is
     ///   reserved only for when casting the `usize` to a `u32` would overflow.
     #[doc(hidden)]
+    #[must_use]
     fn try_size(&self) -> Option<u32>;
     /// Returns a pointer valid for the length of the [`try_size`] result.
     ///
@@ -27,6 +28,7 @@ pub unsafe trait Aad: Sealed {
     ///
     /// [`try_size`]: Aad::try_size
     #[doc(hidden)]
+    #[must_use]
     fn ptr(&self) -> *const u8;
 
     /// # Trait Safety
@@ -41,12 +43,14 @@ pub unsafe trait Aad: Sealed {
     /// [`try_size`]: Aad::try_size
     /// [`is_valid_size`]: Aad::is_valid_size
     #[doc(hidden)]
+    #[must_use]
     unsafe fn size(&self) -> u32;
 
     /// Returns `true` IFF the result of [`try_size`] would be `Some`.
     ///
     /// [`try_size`]: Aad::try_size
     #[doc(hidden)]
+    #[must_use]
     fn is_valid_size(&self) -> bool;
 }
 
@@ -72,16 +76,6 @@ impl<'a> PartialEq<[u8]> for AadSlice<'a> {
     #[inline]
     fn eq(&self, other: &[u8]) -> bool {
         self.inner.is_some_and(|inner| inner == other)
-    }
-}
-
-#[inline]
-#[must_use]
-const fn to_u32(num: usize) -> Option<u32> {
-    if can_cast_u32(num) {
-        Some(num as u32)
-    } else {
-        None
     }
 }
 
@@ -132,32 +126,211 @@ impl<'a> From<&'a [u8]> for AadSlice<'a> {
 impl<'a> Sealed for AadSlice<'a> {}
 
 unsafe impl<'a> Aad for AadSlice<'a> {
-    #[doc(hidden)]
     #[inline]
     fn try_size(&self) -> Option<u32> { self.size() }
-    #[doc(hidden)]
     #[inline]
     fn ptr(&self) -> *const u8 { self.as_ptr() }
 
-    #[doc(hidden)]
-    #[cfg(debug_assertions)]
-    #[track_caller]
     #[inline]
-    #[must_use]
     unsafe fn size(&self) -> u32 {
-        assert!(self.is_valid_size());
+        debug_assert!(self.is_valid_size());
         self.inner.map_or(0, |inner| inner.len() as u32)
     }
 
-    #[doc(hidden)]
-    #[cfg(not(debug_assertions))]
-    #[inline]
-    #[must_use]
-    unsafe fn size(&self) -> u32 {
-        self.inner.map_or(0, |inner| inner.len() as u32)
-    }
-
-    #[doc(hidden)]
     #[inline]
     fn is_valid_size(&self) -> bool { self.valid_size() }
+}
+
+impl<'a> Sealed for &'a [u8] {}
+
+unsafe impl<'a> Aad for &'a [u8] {
+    #[inline]
+    fn try_size(&self) -> Option<u32> {
+        to_u32(self.len())
+    }
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        self.as_ptr()
+    }
+    #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
+    unsafe fn size(&self) -> u32 {
+        debug_assert!(self.is_valid_size());
+        self.len() as u32
+    }
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        can_cast_u32(self.len())
+    }
+}
+
+impl<'a> Sealed for &'a str {}
+
+unsafe impl<'a> Aad for &'a str {
+    #[inline]
+    fn try_size(&self) -> Option<u32> {
+        to_u32(self.len())
+    }
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        self.as_ptr()
+    }
+    #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
+    unsafe fn size(&self) -> u32 {
+        debug_assert!(self.is_valid_size());
+        self.len() as u32
+    }
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        can_cast_u32(self.len())
+    }
+}
+
+impl Sealed for () {}
+
+unsafe impl Aad for () {
+    #[inline]
+    fn try_size(&self) -> Option<u32> {
+        Some(0)
+    }
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        core::ptr::null()
+    }
+    #[inline]
+    unsafe fn size(&self) -> u32 {
+        0
+    }
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        true
+    }
+}
+
+impl<T: Sealed> Sealed for Option<T> {}
+
+unsafe impl<T: Aad> Aad for Option<T> {
+    #[inline]
+    fn try_size(&self) -> Option<u32> {
+        match self {
+            None => Some(0),
+            Some(inner) => inner.try_size()
+        }
+    }
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        match self {
+            None => core::ptr::null(),
+            Some(inner) => inner.ptr()
+        }
+    }
+    #[inline]
+    unsafe fn size(&self) -> u32 {
+        match self {
+            None => 0,
+            Some(inner) => inner.size()
+        }
+    }
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        match self {
+            None => true,
+            Some(inner) => inner.is_valid_size()
+        }
+    }
+}
+
+alloc! {
+    impl<'a> Sealed for &'a Vec<u8> {}
+
+    unsafe impl<'a> Aad for &'a Vec<u8> {
+        #[inline]
+        fn try_size(&self) -> Option<u32> {
+            to_u32(self.len())
+        }
+        #[inline]
+        fn ptr(&self) -> *const u8 {
+            self.as_ptr()
+        }
+        #[inline]
+        #[cfg_attr(debug_assertions, track_caller)]
+        unsafe fn size(&self) -> u32 {
+            debug_assert!(self.is_valid_size());
+            self.len() as u32
+        }
+        #[inline]
+        fn is_valid_size(&self) -> bool {
+            can_cast_u32(self.len())
+        }
+    }
+
+    impl Sealed for Vec<u8> {}
+
+    unsafe impl Aad for Vec<u8> {
+        #[inline]
+        fn try_size(&self) -> Option<u32> {
+            to_u32(self.len())
+        }
+        #[inline]
+        fn ptr(&self) -> *const u8 {
+            self.as_ptr()
+        }
+        #[inline]
+        #[cfg_attr(debug_assertions, track_caller)]
+        unsafe fn size(&self) -> u32 {
+            debug_assert!(self.is_valid_size());
+            self.len() as u32
+        }
+        #[inline]
+        fn is_valid_size(&self) -> bool {
+            can_cast_u32(self.len())
+        }
+    }
+
+    impl<'a> Sealed for &'a String {}
+
+    unsafe impl<'a> Aad for &'a String {
+        #[inline]
+        fn try_size(&self) -> Option<u32> {
+            to_u32(self.len())
+        }
+        #[inline]
+        fn ptr(&self) -> *const u8 {
+            self.as_ptr()
+        }
+        #[inline]
+        #[cfg_attr(debug_assertions, track_caller)]
+        unsafe fn size(&self) -> u32 {
+            debug_assert!(self.is_valid_size());
+            self.len() as u32
+        }
+        #[inline]
+        fn is_valid_size(&self) -> bool {
+            can_cast_u32(self.len())
+        }
+    }
+
+    impl Sealed for String {}
+
+    unsafe impl Aad for String {
+        #[inline]
+        fn try_size(&self) -> Option<u32> {
+            to_u32(self.len())
+        }
+        #[inline]
+        fn ptr(&self) -> *const u8 {
+            self.as_ptr()
+        }
+        #[inline]
+        #[cfg_attr(debug_assertions, track_caller)]
+        unsafe fn size(&self) -> u32 {
+            debug_assert!(self.is_valid_size());
+            self.len() as u32
+        }
+        #[inline]
+        fn is_valid_size(&self) -> bool {
+            can_cast_u32(self.len())
+        }
+    }
 }

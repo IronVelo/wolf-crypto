@@ -66,17 +66,16 @@ impl AesGcm {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    /// use wolf_crypto::{aead::{AesGcm, AadSlice}, aes::Key, buf::Nonce};
     ///
     /// let key = Key::Aes256([1u8; 32]);
     /// let nonce: Nonce = [2u8; 12].into();;
     ///
     /// let input = [3u8; 32];
     /// let mut output = [0u8; 32];
-    /// let aad = Aad::EMPTY;
     ///
     /// let mut gcm = AesGcm::new(&key).unwrap();
-    /// let tag = gcm.encrypt_sized(nonce, &input, &mut output, aad).unwrap();
+    /// let tag = gcm.encrypt_sized(nonce, &input, &mut output, AadSlice::EMPTY).unwrap();
     ///
     /// assert_ne!(input, output);
     /// ```
@@ -125,17 +124,16 @@ impl AesGcm {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    /// use wolf_crypto::{aead::{AesGcm, AadSlice}, aes::Key, buf::Nonce};
     ///
     /// let key = Key::Aes256([1u8; 32]);
     /// let nonce: Nonce = [2u8; 12].into();
     ///
     /// let mut output = [0u8; 32];
     /// let input = [3u8; 32];
-    /// let aad = Aad::EMPTY;
     ///
     /// let mut gcm = AesGcm::new(&key).unwrap();
-    /// let tag = gcm.try_encrypt(nonce, &input, &mut output, aad).unwrap();
+    /// let tag = gcm.try_encrypt(nonce, &input, &mut output, AadSlice::EMPTY).unwrap();
     ///
     /// assert_ne!(input, output);
     /// ```
@@ -177,17 +175,16 @@ impl AesGcm {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    /// use wolf_crypto::{aead::{AesGcm, AadSlice}, aes::Key, buf::Nonce};
     ///
     /// let key = Key::Aes256([1u8; 32]);
     /// let nonce: Nonce = [2u8; 12].into();
     ///
     /// let mut output = [0u8; 32];
     /// let input = [3u8; 32];
-    /// let aad = Aad::EMPTY;
     ///
     /// let mut gcm = AesGcm::new(&key).unwrap();
-    /// let tag = gcm.encrypt(nonce, &input, &mut output, aad);
+    /// let tag = gcm.encrypt(nonce, &input, &mut output, AadSlice::EMPTY);
     ///
     /// assert_ne!(input, output);
     /// ```
@@ -239,14 +236,14 @@ impl AesGcm {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    /// use wolf_crypto::{aead::{AesGcm, AadSlice}, aes::Key, buf::Nonce};
     ///
     /// let key = Key::Aes256([1u8; 32]);
     /// let nonce: Nonce = [2u8; 12].into();
     ///
     /// let mut ciphertext = [0u8; 32];
     /// let plaintext = [3u8; 32];
-    /// let aad = Aad::EMPTY;
+    /// let aad = AadSlice::EMPTY;
     ///
     /// let mut gcm = AesGcm::new(&key).unwrap();
     /// let tag = gcm.encrypt_sized(nonce.copy(), &plaintext, &mut ciphertext, aad).unwrap();
@@ -300,20 +297,19 @@ impl AesGcm {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    /// use wolf_crypto::{aead::AesGcm, aes::Key, buf::Nonce};
     ///
     /// let key = Key::Aes256([1u8; 32]);
     /// let nonce: Nonce = [2u8; 12].into();
     ///
     /// let mut ciphertext = [0u8; 32];
     /// let plaintext = [3u8; 32];
-    /// let aad = Aad::EMPTY;
     ///
     /// let mut gcm = AesGcm::new(&key).unwrap();
-    /// let tag = gcm.try_encrypt(nonce.copy(), &plaintext, &mut ciphertext, aad).unwrap();
+    /// let tag = gcm.try_encrypt(nonce.copy(), &plaintext, &mut ciphertext, ()).unwrap();
     ///
     /// let mut decrypted = [0u8; 32];
-    /// let result = gcm.try_decrypt(nonce, &ciphertext, &mut decrypted, aad, &tag);
+    /// let result = gcm.try_decrypt(nonce, &ciphertext, &mut decrypted, (), &tag);
     ///
     /// assert!(result.is_ok());
     /// assert_eq!(plaintext, decrypted);
@@ -353,20 +349,19 @@ impl AesGcm {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{aes::{Key, AesGcm, Aad}, buf::Nonce};
+    /// use wolf_crypto::{aead::AesGcm, aes::Key, buf::Nonce};
     ///
     /// let key = Key::Aes256([1u8; 32]);
     /// let nonce: Nonce = [2u8; 12].into();
     ///
     /// let mut ciphertext = [0u8; 32];
     /// let plaintext = [3u8; 32];
-    /// let aad = Aad::EMPTY;
     ///
     /// let mut gcm = AesGcm::new(&key).unwrap();
-    /// let tag = gcm.encrypt(nonce.copy(), &plaintext, &mut ciphertext, aad);
+    /// let tag = gcm.encrypt(nonce.copy(), &plaintext, &mut ciphertext, ());
     ///
     /// let mut decrypted = [0u8; 32];
-    /// gcm.decrypt(nonce, &ciphertext, &mut decrypted, aad, &tag);
+    /// gcm.decrypt(nonce, &ciphertext, &mut decrypted, (), &tag);
     ///
     /// assert_eq!(plaintext, decrypted);
     /// ```

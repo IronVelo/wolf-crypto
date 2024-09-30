@@ -55,14 +55,46 @@ macro_rules! opaque_dbg {
             }
         }
     };
+    ($struct:ident <$($param:ident),*>) => {
+        impl ::core::fmt::Debug for $struct <$($param),*> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str(concat!(stringify!($struct), "<", $(stringify!($param)),*, ">"))
+            }
+        }
+    }
 }
 
 macro_rules! into_result {
-    ($res:ident, ok => $ok:expr, err => $err:expr) => {
+    ($res:expr, ok => $ok:expr, err => $err:expr) => {
         if $res.is_ok() {
             Ok($ok)
         } else {
             Err($err)
         }
+    };
+}
+
+macro_rules! define_state {
+    (
+        $(#[$meta:meta])*
+        $name:ident
+    ) => {
+        $(#[$meta])*
+        pub struct $name;
+
+        impl $crate::sealed::Sealed for $name {}
+        impl State for $name {}
+    };
+
+    ($(
+        $(#[$meta:meta])*
+        $name:ident
+    ),* $(,)?) => {
+        $(
+            define_state! {
+                $(#[$meta])*
+                $name
+            }
+        )*
     };
 }

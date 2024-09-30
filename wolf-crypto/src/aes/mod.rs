@@ -16,14 +16,10 @@
 // }
 
 hidden! {
-    pub mod gcm;
     pub mod ctr;
 }
 
-pub use {
-    gcm::{AesGcm, Tag, Aad},
-    crate::aes::ctr::AesCtr
-};
+pub use { crate::aes::ctr::AesCtr };
 
 #[cfg(test)]
 pub mod test_utils;

@@ -82,3 +82,13 @@ pub(crate) const fn lte<const MAX: usize>(value: usize) -> bool {
 pub(crate) const fn gte<const MIN: usize>(value: usize) -> bool {
     value >= MIN
 }
+
+#[inline]
+#[must_use]
+pub(crate) const fn to_u32(num: usize) -> Option<u32> {
+    if can_cast_u32(num) {
+        Some(num as u32)
+    } else {
+        None
+    }
+}
