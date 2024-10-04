@@ -639,20 +639,25 @@ impl CtPoly1305 {
     }
 }
 
-#[test]
-fn swag() {
-    let key: Key = [69; 32].into();
-    let tag = Poly1305::new(key.as_ref())
-        .update_ct(b"hello world")
-        .update_ct(b"good day to you")
-        .update_ct(b"mmm yes mm yes indeed mm")
-        .update_ct(b"hmm...")
-        .finalize()
-        .unwrap();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let o_tag = Poly1305::new(key.as_ref())
-        .mac(b"hello worldgood day to yoummm yes mm yes indeed mmhmm...", b"")
-        .unwrap();
+    #[test]
+    fn smoke() {
+        let key: Key = [69; 32].into();
+        let tag = Poly1305::new(key.as_ref())
+            .update_ct(b"hello world")
+            .update_ct(b"good day to you")
+            .update_ct(b"mmm yes mm yes indeed mm")
+            .update_ct(b"hmm...")
+            .finalize()
+            .unwrap();
 
-    assert_eq!(tag, o_tag);
+        let o_tag = Poly1305::new(key.as_ref())
+            .mac(b"hello worldgood day to yoummm yes mm yes indeed mmhmm...", b"")
+            .unwrap();
+
+        assert_eq!(tag, o_tag);
+    }
 }
