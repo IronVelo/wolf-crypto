@@ -243,14 +243,13 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
         -   [X] BLAKE2b
         -   [X] BLAKE2s
 
--   [-] AEAD <code>[1/5]</code>
+-   [-] AEAD <code>[2/5]</code>
     -   [X] AES-GCM <code>[3/3]</code>
         -   [X] 256
         -   [X] 192
         -   [X] 128
-    -   [ ] ChaCha20-Poly1305 <code>[0/2]</code>
-        -   [ ] 256
-        -   [ ] 128
+    -   [X] ChaCha20-Poly1305 <code>[1/1]</code>
+        -   [X] 256
     -   [ ] AES-CCM <code>[0/3]</code>
         -   [ ] 256
         -   [ ] 192
