@@ -44,7 +44,7 @@ impl Tag {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::aes::gcm::Tag;
+    /// use wolf_crypto::aead::Tag;
     ///
     /// let tag = Tag::new_zeroed();
     /// assert_eq!(tag.as_slice(), &[0u8; 16]);

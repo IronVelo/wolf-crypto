@@ -1,13 +1,70 @@
+//! The `ChaCha20Poly1305` Authenticated Encryption with Associated Data (AEAD).
+//!
+//! This module offers both one-shot encryption/decryption functions and a stateful API that can be
+//! used to perform streaming encryption/decryption with optional associated data (AAD). The
+//! stateful API ensures correct usage through a compile-time state machine.
+//!
+//! # Examples
+//!
+//! Using the one-shot encryption function:
+//!
+//! ```rust
+//! use wolf_crypto::aead::chacha20_poly1305::{encrypt, decrypt_in_place, Key};
+//!
+//! # fn main() -> Result<(), wolf_crypto::Unspecified> {
+//! let key = Key::new([0u8; 32]);
+//! let iv = [0u8; 12];
+//! let plaintext = b"Secret message";
+//! let mut ciphertext = [0u8; 14];
+//!
+//! let tag = encrypt(key.as_ref(), &iv, plaintext, &mut ciphertext, ())?;
+//! decrypt_in_place(key, iv, &mut ciphertext, (), tag)?;
+//!
+//! assert_eq!(ciphertext, *plaintext);
+//! # Ok(()) }
+//! ```
+//!
+//! Using the stateful API:
+//!
+//! ```rust
+//! use wolf_crypto::{aead::ChaCha20Poly1305, MakeOpaque};
+//! use wolf_crypto::mac::poly1305::Key;
+//!
+//! # fn main() -> Result<(), wolf_crypto::Unspecified> {
+//! let plaintext = b"Secret message";
+//! let aad = "Additional data";
+//! let mut ciphertext = [0u8; 14];
+//!
+//! let tag = ChaCha20Poly1305::new_encrypt(Key::new([7u8; 32]), [7u8; 12])
+//!     .set_aad(aad).opaque()?
+//!     .update(plaintext, &mut ciphertext).opaque()?
+//!     .finalize().opaque()?;
+//!
+//! let d_tag = ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [7u8; 12])
+//!     .update_aad("Additional ")
+//!     .opaque_bind(|aead| aead.update_aad("data"))
+//!     .opaque_bind(|aead| aead.update_in_place(&mut ciphertext))
+//!     .opaque_bind(|aead| aead.finalize())?;
+//!
+//! assert_eq!(tag, d_tag);
+//! assert_eq!(ciphertext, *plaintext);
+//! # Ok(())}
+//! ```
+
 pub mod states;
 
 use wolf_crypto_sys::{
-    wc_ChaCha20Poly1305_Init,
     ChaChaPoly_Aead,
     wc_ChaCha20Poly1305_UpdateData, wc_ChaCha20Poly1305_UpdateAad,
-    wc_ChaCha20Poly1305_Final,
-    CHACHA20_POLY1305_AEAD_DECRYPT, CHACHA20_POLY1305_AEAD_ENCRYPT,
-
+    wc_ChaCha20Poly1305_Init, wc_ChaCha20Poly1305_Final,
     wc_ChaCha20Poly1305_Decrypt, wc_ChaCha20Poly1305_Encrypt,
+    CHACHA20_POLY1305_AEAD_DECRYPT, CHACHA20_POLY1305_AEAD_ENCRYPT,
+};
+
+#[cfg(feature = "llvm-assume")]
+use wolf_crypto_sys::{
+    CHACHA20_POLY1305_STATE_READY, CHACHA20_POLY1305_STATE_AAD, CHACHA20_POLY1305_STATE_DATA,
+    byte
 };
 
 use states::{
@@ -28,7 +85,10 @@ use crate::aead::{Aad, Tag};
 use crate::buf::{GenericIv, U12};
 use crate::mac::poly1305::GenericKey;
 use crate::opaque_res::Res;
-use crate::{can_cast_u32, Unspecified};
+use crate::{can_cast_u32, const_can_cast_u32, Unspecified};
+
+#[doc(inline)]
+pub use crate::mac::poly1305::{Key, KeyRef};
 
 opaque_dbg! { ChaCha20Poly1305<Init> }
 opaque_dbg! { ChaCha20Poly1305<EncryptMaybeAad> }
@@ -44,6 +104,44 @@ fn oneshot_predicate<A: Aad>(plain: &[u8], out: &[u8], aad: &A) -> bool {
     can_cast_u32(plain.len()) && out.len() >= plain.len() && aad.is_valid_size()
 }
 
+/// Encrypts data using the `ChaCha20Poly1305` AEAD.
+///
+/// # Arguments
+///
+/// * `key` - The 32-byte key material.
+/// * `iv` - The 12-byte initialization vector.
+/// * `plain` - The plaintext data to encrypt.
+/// * `out` - The buffer to store the resulting ciphertext. The buffer must be at least as large
+///   as `plain`.
+/// * `aad` - The associated data, which is authenticated but not encrypted.
+///
+/// # Returns
+///
+/// The authentication [`Tag`] for the ciphertext, used to verify the integrity and authenticity
+/// of the data during decryption.
+///
+/// # Errors
+///
+/// - The length of the plaintext is greater than [`u32::MAX`].
+/// - The length of the output buffer is less than the plaintext length.
+/// - The length of the associated data is greater than [`u32::MAX`].
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::{aead::chacha20_poly1305::encrypt, mac::poly1305::Key};
+///
+/// let mut out = [0u8; 12];
+///
+/// let tag = encrypt(
+///     Key::new([7u8; 32]), [42u8; 12],
+///     b"hello world!", &mut out,
+///     "Some additional data"
+/// ).unwrap();
+///
+/// assert_ne!(&out, b"hello world!");
+/// # let _ = tag;
+/// ```
 pub fn encrypt<K, IV, A>(
     key: K, iv: IV,
     plain: &[u8], out: &mut [u8],
@@ -74,6 +172,36 @@ pub fn encrypt<K, IV, A>(
     res.unit_err(tag)
 }
 
+/// Encrypts data in-place using the `ChaCha20Poly1305` AEAD.
+///
+/// # Arguments
+///
+/// * `key` - The 32-byte key material.
+/// * `iv` - The 12-byte initialization vector.
+/// * `in_out` - A mutable buffer containing the plaintext, which is overwritten with the ciphertext.
+/// * `aad` - The associated data, which is authenticated but not encrypted.
+///
+/// # Returns
+///
+/// The authentication [`Tag`] for the ciphertext, used to verify the integrity and authenticity
+/// of the data during decryption.
+///
+/// # Errors
+///
+/// - The length of the plaintext is greater than [`u32::MAX`].
+/// - The length of the associated data is greater than [`u32::MAX`].
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::aead::chacha20_poly1305::{encrypt_in_place, Key};
+///
+/// let mut in_out = *b"Hello, world!";
+/// let tag = encrypt_in_place(Key::new([7u8; 32]), [42u8; 12], &mut in_out, "additional").unwrap();
+///
+/// assert_ne!(&in_out, b"Hello, world!");
+/// # let _ = tag;
+/// ```
 pub fn encrypt_in_place<K, IV, A>(key: K, iv: IV, in_out: &mut [u8], aad: A) -> Result<Tag, Unspecified>
     where
         K: GenericKey,
@@ -100,6 +228,38 @@ pub fn encrypt_in_place<K, IV, A>(key: K, iv: IV, in_out: &mut [u8], aad: A) -> 
     res.unit_err(tag)
 }
 
+/// Decrypts data using the `ChaCha20Poly1305` AEAD.
+///
+/// # Arguments
+///
+/// * `key` - The 32-byte key material.
+/// * `iv` - The 12-byte initialization vector.
+/// * `cipher` - The ciphertext to decrypt.
+/// * `out` - The buffer to store the resulting plaintext. The buffer must be at least as large as
+///   `cipher`.
+/// * `aad` - The associated data, which is authenticated but not encrypted.
+/// * `tag` - The authentication tag to verify.
+///
+/// # Errors
+///
+/// - The length of the ciphertext is greater than [`u32::MAX`].
+/// - The length of the output buffer is less than the plaintext length.
+/// - The length of the associated data is greater than [`u32::MAX`].
+/// - The verification of the authentication tag failed, indicating tampering.
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::aead::chacha20_poly1305::{encrypt_in_place, decrypt, Key};
+///
+/// let (key, iv, mut cipher) = (Key::new([7u8; 32]), [42u8; 12], *b"plaintext");
+/// let tag = encrypt_in_place(key.as_ref(), &iv, &mut cipher, "additional data").unwrap();
+///
+/// let mut plain = [0u8; 9];
+/// decrypt(key, iv, &cipher, &mut plain, "additional data", tag).unwrap();
+///
+/// assert_eq!(plain, *b"plaintext");
+/// ```
 pub fn decrypt<K, IV, A>(
     key: K, iv: IV,
     cipher: &[u8], out: &mut [u8],
@@ -129,6 +289,34 @@ pub fn decrypt<K, IV, A>(
     res.unit_err(())
 }
 
+/// Decrypts data in-place using the `ChaCha20Poly1305` AEAD.
+///
+/// # Arguments
+///
+/// * `key` - The 32-byte key material.
+/// * `iv` - The 12-byte initialization vector.
+/// * `in_out` - A mutable buffer containing the ciphertext, which is overwritten with the plaintext.
+/// * `aad` - The associated data, which is authenticated but not encrypted.
+/// * `tag` - The authentication tag to verify.
+///
+/// # Errors
+///
+/// - The length of the ciphertext is greater than [`u32::MAX`].
+/// - The length of the associated data is greater than [`u32::MAX`].
+/// - The verification of the authentication tag failed, indicating tampering.
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::aead::chacha20_poly1305::{encrypt_in_place, decrypt_in_place, Key};
+///
+/// let (key, iv, mut in_out) = (Key::new([7u8; 32]), [42u8; 12], *b"plaintext");
+/// let tag = encrypt_in_place(key.as_ref(), &iv, &mut in_out, "additional data").unwrap();
+///
+/// decrypt_in_place(key, iv, &mut in_out, "additional data", tag).unwrap();
+///
+/// assert_eq!(in_out, *b"plaintext");
+/// ```
 pub fn decrypt_in_place<K, IV, A>(
     key: K, iv: IV,
     in_out: &mut [u8],
@@ -157,6 +345,166 @@ where
 
     res.unit_err(())
 }
+
+/// The `ChaCha20Poly1305` ([`RFC8439`][1]) [AEAD][2].
+///
+/// `ChaCha20Poly1305` combines the [`ChaCha20`][3] stream cipher with the [`Poly1305`][4] message
+/// authentication code. `ChaCha20Poly1305` is well-regarded for efficiency and performance, with
+/// or without hardware acceleration, making it amenable to resource constrained environments.
+///
+/// # Interface
+///
+/// This crate's interface for `ChaCha20Poly1305` is designed as a compile-time state machine,
+/// ensuring errors / misuse is caught early, and without any runtime overhead.
+///
+/// The state machine for both encryption and decryption follows the following flow
+///
+/// ```txt
+///                       set_aad(...)
+///   +--------------------------------------+
+///   |           +---+                      |
+///   |           |   v                      v           finalize()
+/// +------+     +-----+   finish()        +----------+        +-----+
+/// | Init | --> | AAD | ----------------> |          | -----> | Tag |
+/// +------+     +-----+                   | Updating |        +-----+
+///   |                   update(...)      |          |
+///   +----------------------------------> |          |
+///                                        +----------+
+///                                          ^      |
+///                                          +------+
+/// ```
+///
+/// The state machine is initialized in either decryption or encryption mode, this initial state
+/// has the following three possible transitions:
+///
+/// ```txt
+///                 +------------------+
+///   +------------ |       Init       | --------+
+///   |             +------------------+         |
+///   |               |                          |
+///   |               | update_aad(...)          |
+///   |               v                          |
+///   |             +------------------+         |
+///   |             |                  |--+      |
+///   |             |       AAD        |  |      |
+///   |             |                  |<-+      |
+///   |             +------------------+         |
+///   |               |                          |
+///   | update(...)   | finish()                 | set_aad(...)
+///   |               v                          |
+///   |             +------------------+         |
+///   +-----------> |     Updating     | <-------+
+///                 +------------------+
+///                          |
+///                          v
+///                         ...
+/// ```
+///
+/// - [`update(...)`][5] path:
+///     The user encrypts or decrypts data without providing any AAD. This method is used
+///     to process the main body of the message. After processing the plaintext or ciphertext,
+///     the user can either continue updating with more data, or invoke [`finalize()`][6]
+///     to return the authentication tag.
+/// - [`set_aad`][6] path:
+///     Similar to the [`update(...)`][5] path, but this method sets the associated data (AAD),
+///     which is data that is authenticated but not encrypted. The AAD is processed first
+///     before transitioning to the `Updating` state, where data is encrypted or decrypted.
+///     AAD helps verify the integrity of the message.
+/// - [`update_aad(...)`][7] path:
+///     This method transitions to the `AAD` state, allowing the user to process associated
+///     data in chunks. It is useful in cases where the complete AAD is not available at once,
+///     and the user needs to progressively update it. Once all AAD is processed, the state
+///     transitions to `Updating` by invoking [`finish()`][8].
+///
+/// # Examples
+///
+/// ```
+/// use wolf_crypto::{aead::ChaCha20Poly1305, mac::poly1305::Key, MakeOpaque};
+///
+/// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+/// let mut in_out = [7u8; 42];
+/// let key = Key::new([3u8; 32]);
+///
+/// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
+///     .update_in_place(&mut in_out).opaque()?
+///     .finalize().opaque()?;
+///
+/// assert_ne!(in_out, [7u8; 42]);
+///
+/// let d_tag = ChaCha20Poly1305::new_decrypt(key.as_ref(), [7u8; 12])
+///     .update_in_place(&mut in_out).opaque()?
+///     .finalize().opaque()?;
+///
+/// // PartialEq for tags is constant time
+/// assert_eq!(tag, d_tag);
+/// assert_eq!(in_out, [7u8; 42]);
+/// #
+/// # Ok(()) }
+/// ```
+///
+/// **With AAD**
+///
+/// ```
+/// use wolf_crypto::{aead::ChaCha20Poly1305, mac::poly1305::Key, MakeOpaque};
+///
+/// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+/// let mut in_out = [7u8; 42];
+/// let key = Key::new([3u8; 32]);
+///
+/// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
+///     .set_aad("hello world").opaque()?
+///     .update_in_place(&mut in_out).opaque()?
+///     .finalize().opaque()?;
+///
+/// assert_ne!(in_out, [7u8; 42]);
+///
+/// let d_tag = ChaCha20Poly1305::new_decrypt(key.as_ref(), [7u8; 12])
+///     .set_aad("hello world")
+///     .opaque_bind(|aead| aead.update_in_place(&mut in_out))
+///     .opaque_bind(|aead| aead.finalize())?;
+///
+/// // PartialEq for tags is constant time
+/// assert_eq!(tag, d_tag);
+/// assert_eq!(in_out, [7u8; 42]);
+/// #
+/// # Ok(()) }
+/// ```
+///
+/// # Errors
+///
+/// To guarantee that the state machine is correctly used, all methods take ownership over the
+/// `ChaCha20Poly1305` instance. The `ChaCha20Poly1305` instance is always returned whether the
+/// operation failed or not, allowing for retries.
+///
+/// For example, with the [`set_aad(...)`][6] method:
+///
+/// ```txt
+///     Error!
+///   +----------+
+///   v          |
+/// +--------------+  Success!   +----------------+
+/// | set_aad(...) | ----------> | Updating State |
+/// +--------------+             +----------------+
+/// ```
+///
+/// While this serves its purpose in allowing retries, it can be annoying for error propagation. To
+/// remedy this, there is the [`MakeOpaque`] trait, which will convert the error type into the
+/// [`Unspecified`] type via the [`opaque`] method, as well as provide common combinatorics such as
+/// [`opaque_bind`] and [`opaque_map`].
+///
+/// [1]: https://datatracker.ietf.org/doc/html/rfc8439
+/// [2]: https://en.wikipedia.org/wiki/Authenticated_encryption
+/// [3]: crate::chacha::ChaCha20
+/// [4]: crate::mac::Poly1305
+/// [5]: ChaCha20Poly1305::update
+/// [6]: ChaCha20Poly1305::set_aad
+/// [7]: ChaCha20Poly1305::update_aad
+/// [8]: ChaCha20Poly1305::finish
+///
+/// [`MakeOpaque`]: crate::MakeOpaque
+/// [`opaque`]: crate::MakeOpaque::opaque
+/// [`opaque_bind`]: crate::MakeOpaque::opaque_bind
+/// [`opaque_map`]: crate::MakeOpaque::opaque_map
 #[must_use]
 #[repr(transparent)]
 pub struct ChaCha20Poly1305<S: State = Init> {
@@ -165,6 +513,18 @@ pub struct ChaCha20Poly1305<S: State = Init> {
 }
 
 impl ChaCha20Poly1305<Init> {
+    /// Creates a new `ChaCha20Poly1305` instance with the specified direction.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The 32-byte key material.
+    /// * `iv` - The 12-byte initialization vector.
+    /// * `dir` - The direction of the operation (`CHACHA20_POLY1305_AEAD_ENCRYPT` or
+    ///   `CHACHA20_POLY1305_AEAD_DECRYPT`).
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe as it assumes that the provided `dir` is valid.
     fn new_with_dir<K, IV, S>(key: K, iv: IV, dir: core::ffi::c_int) -> ChaCha20Poly1305<S>
         where
             K: GenericKey,
@@ -195,15 +555,125 @@ impl ChaCha20Poly1305<Init> {
         }
     }
 
-    pub fn new<Mode: Updating>(
-        key: impl GenericKey,
-        iv: impl GenericIv<Size = U12>
-    ) -> ChaCha20Poly1305<Mode::InitState> {
+    /// Create a new [`ChaCha20Poly1305`] instance for either encryption or decryption.
+    ///
+    /// # Generic
+    ///
+    /// The provided `Mode` generic denotes whether this instance will be used for encryption or
+    /// decryption. The possible types are:
+    ///
+    /// * [`Decrypt`] - Initialize the instance for decryption, there is also the [`new_decrypt`][1]
+    ///   convenience associated function.
+    /// * [`Encrypt`] - Initialize the instance for encryption, there is also the [`new_encrypt`][2]
+    ///   convenience associated function.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The 32 byte key material to use.
+    /// * `iv`  - The 12 byte initialization vector to use.
+    ///
+    /// # Examples
+    ///
+    /// **Decryption**
+    /// ```
+    /// use wolf_crypto::{aead::chacha20_poly1305::{ChaCha20Poly1305, Decrypt}, mac::poly1305::Key};
+    ///
+    /// # let _ = {
+    /// ChaCha20Poly1305::new::<Decrypt>(Key::new([7u8; 32]), [42u8; 12])
+    /// # };
+    /// ```
+    ///
+    /// **Encryption**
+    /// ```
+    /// use wolf_crypto::{aead::chacha20_poly1305::{ChaCha20Poly1305, Encrypt}, mac::poly1305::Key};
+    ///
+    /// # let _ = {
+    /// ChaCha20Poly1305::new::<Encrypt>(Key::new([7u8; 32]), [42u8; 12])
+    /// # };
+    /// ```
+    ///
+    /// [1]: Self::new_decrypt
+    /// [2]: Self::new_encrypt
+    #[inline]
+    pub fn new<Mode: Updating>(key: impl GenericKey, iv: impl GenericIv<Size = U12>) -> ChaCha20Poly1305<Mode::InitState> {
         Self::new_with_dir(key, iv, Mode::direction())
+    }
+
+    /// Create a new [`ChaCha20Poly1305`] instance for encryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The 32 byte key material to use.
+    /// * `iv`  - The 12 byte initialization vector to use.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aead::ChaCha20Poly1305, mac::poly1305::Key};
+    ///
+    /// # let _ = {
+    /// ChaCha20Poly1305::new_encrypt(Key::new([7u8; 32]), [42u8; 12])
+    /// # };
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// This is a convenience associated function for calling [`ChaCha20Poly1305::new::<Encrypt>(...)`][1],
+    /// circumventing the need for importing the [`Encrypt`] marker type.
+    ///
+    /// [1]: Self::new
+    #[inline]
+    pub fn new_encrypt<K, IV>(key: K, iv: IV) -> ChaCha20Poly1305<<Encrypt as Updating>::InitState>
+        where
+            K: GenericKey,
+            IV: GenericIv<Size = U12>
+    {
+        ChaCha20Poly1305::new::<Encrypt>(key, iv)
+    }
+
+    /// Create a new [`ChaCha20Poly1305`] instance for decryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The 32 byte key material to use.
+    /// * `iv`  - The 12 byte initialization vector to use.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aead::ChaCha20Poly1305, mac::poly1305::Key};
+    ///
+    /// # let _ = {
+    /// ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [42u8; 12])
+    /// # };
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// This is a convenience associated function for calling [`ChaCha20Poly1305::new::<Decrypt>(...)`][1],
+    /// circumventing the need for importing the [`Decrypt`] marker type.
+    ///
+    /// [1]: Self::new
+    #[inline]
+    pub fn new_decrypt<K, IV>(key: K, iv: IV) -> ChaCha20Poly1305<<Decrypt as Updating>::InitState>
+        where
+            K: GenericKey,
+            IV: GenericIv<Size = U12>
+    {
+        ChaCha20Poly1305::new::<Decrypt>(key, iv)
     }
 }
 
 impl<S: State> ChaCha20Poly1305<S> {
+    /// Transitions the state of the `ChaCha20Poly1305` instance to a new state.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `N` - The new state type.
+    ///
+    /// # Returns
+    ///
+    /// A new `ChaCha20Poly1305` instance with the updated state.
     #[inline]
     const fn with_state<N: State>(self) -> ChaCha20Poly1305<N> {
         // SAFETY: we're just updating the phantom data state, same everything
@@ -212,8 +682,37 @@ impl<S: State> ChaCha20Poly1305<S> {
 }
 
 impl<S: CanUpdateAad> ChaCha20Poly1305<S> {
+    /// Updates the AAD (Additional Authenticated Data) without performing any safety checks in
+    /// release builds.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the AAD length is safely representable as a `u32`.
+    ///
+    /// # Arguments
+    ///
+    /// * `aad` - The additional authenticated data to include in the authentication tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug mode if the AAD size is invalid or if the internal state is incorrect.
+    #[cfg_attr(debug_assertions, track_caller)]
     #[inline]
     unsafe fn update_aad_unchecked<A: Aad>(&mut self, aad: A) {
+        debug_assert!(aad.is_valid_size());
+
+        #[cfg(feature = "llvm-assume")] {
+            // Guaranteed via trait based state machine
+            core::hint::assert_unchecked(
+                self.inner.state == CHACHA20_POLY1305_STATE_READY as byte ||
+                    self.inner.state == CHACHA20_POLY1305_STATE_AAD as byte
+            );
+
+            core::hint::assert_unchecked(
+                self.inner.state != CHACHA20_POLY1305_STATE_DATA as byte
+            );
+        }
+
         let _res = wc_ChaCha20Poly1305_UpdateAad(
             addr_of_mut!(self.inner),
             aad.ptr(),
@@ -223,6 +722,41 @@ impl<S: CanUpdateAad> ChaCha20Poly1305<S> {
         debug_assert_eq!(_res, 0);
     }
 
+    /// Update the underlying message authentication code without encrypting the data.
+    ///
+    /// This transitions to the streaming state for updating the AAD, allowing for partial updates.
+    /// If you already have the entire AAD, consider using [`set_aad`] instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `aad` - The additional authenticated data to include in the authentication [`Tag`].
+    ///
+    /// # Errors
+    ///
+    /// If the length of the AAD is greater than [`u32::MAX`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aead::chacha20_poly1305::{ChaCha20Poly1305, Key}, MakeOpaque};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let tag = ChaCha20Poly1305::new_encrypt(Key::new([7u8; 32]), [42u8; 12])
+    ///     .update_aad("hello world").opaque()?
+    ///     .update_aad("!").opaque()?
+    ///     .finish()
+    ///     .finalize().opaque()?;
+    ///
+    /// let d_tag = ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [42u8; 12])
+    ///     .update_aad("hello world!").opaque()? // equivalent to processing in parts
+    ///     .finish()
+    ///     .finalize().opaque()?;
+    ///
+    /// assert_eq!(tag, d_tag);
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`set_aad`]: ChaCha20Poly1305::set_aad
     #[inline]
     pub fn update_aad<A: Aad>(mut self, aad: A) -> Result<ChaCha20Poly1305<S::Updating>, Self> {
         if !aad.is_valid_size() { return Err(self) }
@@ -232,11 +766,37 @@ impl<S: CanUpdateAad> ChaCha20Poly1305<S> {
 }
 
 impl<S: CanUpdate> ChaCha20Poly1305<S> {
+    /// Performs an unchecked in-place update of the `data` buffer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the length of `data` can be safely cast to `u32`.
     #[inline]
     unsafe fn update_in_place_unchecked(&mut self, data: &mut [u8]) -> Res {
         debug_assert!(can_cast_u32(data.len()));
 
         let mut res = Res::new();
+
+        #[cfg(feature = "llvm-assume")]
+            // Guaranteed via trait based state machine
+            core::hint::assert_unchecked(!( // written like this to be an exact negation of
+                                            // the failure condition
+                   self.inner.state != CHACHA20_POLY1305_STATE_READY as byte
+                && self.inner.state != CHACHA20_POLY1305_STATE_AAD as byte
+                && self.inner.state != CHACHA20_POLY1305_STATE_DATA as byte
+            ));
+
+        // INFALLIBLE
+        //
+        // https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/chacha20_poly1305.c#L247
+        //
+        // The functions preconditions are as follows:
+        //
+        // - aead != NULL /\ inData != NULL /\ outData == NULL
+        // - state == CHACHA20_POLY1305_STATE_READY
+        //   /\ state == CHACHA20_POLY1305_STATE_AAD
+        //   /\ state == CHACHA20_POLY1305_STATE_DATA
+        //
 
         res.ensure_0(wc_ChaCha20Poly1305_UpdateData(
             addr_of_mut!(self.inner),
@@ -251,12 +811,28 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
         res
     }
 
+    /// Performs an unchecked update of the `data`, writing the `output` to a separate buffer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - `data.len() <= output.len()`
+    /// - The length of `data` can be safely cast to `u32`.
     #[inline]
     unsafe fn update_unchecked(&mut self, data: &[u8], output: &mut [u8]) -> Res {
         debug_assert!(data.len() <= output.len());
         debug_assert!(can_cast_u32(data.len()));
 
         let mut res = Res::new();
+
+        #[cfg(feature = "llvm-assume")] {
+            // Guaranteed via trait based state machine
+            core::hint::assert_unchecked(
+                self.inner.state == CHACHA20_POLY1305_STATE_READY as byte
+                    || self.inner.state == CHACHA20_POLY1305_STATE_AAD as byte
+                    || self.inner.state == CHACHA20_POLY1305_STATE_DATA as byte
+            );
+        }
 
         res.ensure_0(wc_ChaCha20Poly1305_UpdateData(
             addr_of_mut!(self.inner),
@@ -268,12 +844,55 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
         res
     }
 
+    /// Predicate to check if the update operation can proceed.
+    ///
+    /// Ensures that the `input` length can be cast to `u32` and that the `output` buffer is large
+    /// enough.
     #[inline]
     #[must_use]
     const fn update_predicate(input: &[u8], output: &[u8]) -> bool {
         can_cast_u32(input.len()) && output.len() >= input.len()
     }
 
+    /// Updates the internal state with the given data, encrypting or decrypting it in place.
+    ///
+    /// This method processes the provided `data` buffer, updating the internal cipher state, and
+    /// encrypting or decrypting the data in place, depending on whether the instance was created
+    /// in encryption or decryption mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - A mutable slice of data to be encrypted or decrypted in place.
+    ///
+    /// # Errors
+    ///
+    /// If the length of `data` is greater than `u32::MAX`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aead::ChaCha20Poly1305, mac::poly1305::Key, MakeOpaque};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let mut in_out = [7u8; 42];
+    /// let key = Key::new([3u8; 32]);
+    ///
+    /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
+    ///     .set_aad("hello world").opaque()?
+    ///     .update_in_place(&mut in_out).opaque()?
+    ///     .finalize().opaque()?;
+    ///
+    /// assert_ne!(in_out, [7u8; 42]);
+    ///
+    /// let d_tag = ChaCha20Poly1305::new_decrypt(key.as_ref(), [7u8; 12])
+    ///     .set_aad("hello world")
+    ///     .opaque_bind(|aead| aead.update_in_place(&mut in_out))
+    ///     .opaque_bind(|aead| aead.finalize())?;
+    ///
+    /// assert_eq!(tag, d_tag);
+    /// assert_eq!(in_out, [7u8; 42]);
+    /// # Ok(()) }
+    /// ```
     pub fn update_in_place(mut self, data: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
         if !can_cast_u32(data.len()) { return Err(self) }
 
@@ -283,6 +902,89 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
         )
     }
 
+    /// Updates the internal state with the given data, encrypting or decrypting it in place.
+    ///
+    /// This method processes the provided fixed-size `data` buffer, updating the internal cipher
+    /// state, and encrypting or decrypting the data in place, depending on whether the instance was
+    /// created in encryption or decryption mode.
+    ///
+    /// This method is similar to [`update_in_place`], but accepts a fixed-size array, allowing for
+    /// potential optimizations and compile-time checks.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `C` - The size of the data buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - A mutable fixed-size array of data to be encrypted or decrypted in place.
+    ///
+    /// # Errors
+    ///
+    /// If the length of `data` is greater than `u32::MAX`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wolf_crypto::aead::{ChaCha20Poly1305};
+    /// use wolf_crypto::mac::poly1305::Key;
+    /// use wolf_crypto::MakeOpaque;
+    ///
+    /// let mut data = [0u8; 64];
+    /// let key = Key::new([0u8; 32]);
+    /// let iv = [0u8; 12];
+    ///
+    /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
+    ///     .update_in_place_sized(&mut data).unwrap()
+    ///     .finalize().unwrap();
+    /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed());
+    /// ```
+    ///
+    /// [`update_in_place`]: Self::update_in_place
+    #[inline]
+    pub fn update_in_place_sized<const C: usize>(mut self, data: &mut [u8; C]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
+        if !const_can_cast_u32::<C>() { return Err(self) }
+
+        into_result! (unsafe { self.update_in_place_unchecked(data) },
+            ok => self.with_state(),
+            err => self
+        )
+    }
+
+    /// Updates the internal state with the given data, encrypting or decrypting it into a separate
+    /// output buffer.
+    ///
+    /// This method processes the provided `data` slice, updating the internal cipher state, and
+    /// writing the encrypted or decrypted data into the provided `output` buffer, depending on
+    /// whether the instance was created in encryption or decryption mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - A slice of data to be encrypted or decrypted.
+    /// * `output` - A mutable slice where the result will be written. It must be at least as large
+    ///   as `data`.
+    ///
+    /// # Errors
+    ///
+    /// - The length of `data` is greater than `u32::MAX`.
+    /// - The `output` buffer is smaller than the `data` buffer.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wolf_crypto::aead::{ChaCha20Poly1305};
+    /// use wolf_crypto::mac::poly1305::Key;
+    /// use wolf_crypto::MakeOpaque;
+    ///
+    /// let mut data = [0u8; 64];
+    /// let key = Key::new([0u8; 32]);
+    /// let iv = [0u8; 12];
+    ///
+    /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
+    ///     .update_in_place_sized(&mut data).unwrap()
+    ///     .finalize().unwrap();
+    /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed());
+    /// ```
     pub fn update(mut self, data: &[u8], output: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
         if !Self::update_predicate(data, output) { return Err(self) }
 
@@ -294,6 +996,35 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
 }
 
 impl<S: CanSetAad> ChaCha20Poly1305<S> {
+    /// Sets the Additional Authenticated Data (AAD) for the AEAD operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `aad` - The additional authenticated data to include in the authentication tag.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+    ///
+    /// let key = Key::new([7u8; 32]);
+    /// let iv = [42u8; 12];
+    ///
+    /// let aead = ChaCha20Poly1305::new_encrypt(key, iv)
+    ///     .set_aad("additional data").unwrap();
+    /// # drop(aead);
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// If the length of the AAD is greater than `u32::MAX`.
+    ///
+    /// # Notes
+    ///
+    /// - The AAD contributes to the authentication tag but is not part of the encrypted output.
+    /// - If you need to provide the AAD in multiple parts, consider using [`update_aad`] instead.
+    ///
+    /// [`update_aad`]: ChaCha20Poly1305::update_aad
     #[inline]
     pub fn set_aad<A: Aad>(
         mut self,
@@ -308,12 +1039,83 @@ impl<S: CanSetAad> ChaCha20Poly1305<S> {
 }
 
 impl<S: UpdatingAad> ChaCha20Poly1305<S> {
+    /// Signals that no more Additional Authenticated Data (AAD) will be provided, transitioning the
+    /// cipher to the data processing state.
+    ///
+    /// This method finalizes the AAD input phase. After calling `finish`, you may [`finalize`] the
+    /// state machine, or begin updating the cipher with data to be encrypted / decrypted.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+    /// use wolf_crypto::MakeOpaque;
+    ///
+    /// let (key, iv) = (Key::new([7u8; 32]), [42; 12]);
+    ///
+    /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
+    ///     .update_aad("additional ")
+    ///     .opaque_bind(|aead| aead.update_aad("data"))
+    ///     .opaque_bind(|aead| aead.update_aad("..."))
+    ///     .opaque_map(|aead| aead.finish())
+    ///      // (just use Poly1305 directly if you're doing this)
+    ///     .opaque_bind(|aead| aead.finalize()).unwrap();
+    /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed()); // no warnings
+    /// ```
+    ///
+    /// [`finalize`]: ChaCha20Poly1305::finalize
     pub const fn finish(self) -> ChaCha20Poly1305<S::Mode> {
         self.with_state()
     }
 }
 
 impl<S: Updating> ChaCha20Poly1305<S> {
+    /// Finalizes the AEAD operation computing and returning the authentication [`Tag`].
+    ///
+    /// # Returns
+    ///
+    /// The authentication [`Tag`], resulting from the processed AAD and encryption / decryption
+    /// operations.
+    ///
+    /// # Security
+    ///
+    /// On decryption, the returned [`Tag`] should be ensured to be equivalent to the [`Tag`]
+    /// associated with the ciphertext. The decrypted ciphertext **should not be trusted** if
+    /// the tags do not match.
+    ///
+    /// Also, the comparison should not be done outside the [`Tag`] type, you **must not** call
+    /// `as_slice()` or anything for the comparison. **ALWAYS** leverage the [`Tag`]'s `PartialEq`
+    /// implementation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+    ///
+    /// let key = Key::new([7u8; 32]);
+    /// let iv = [42u8; 12];
+    /// let mut data = [0u8; 64];
+    ///
+    /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), iv)
+    ///     .set_aad("additional data").unwrap()
+    ///     .update_in_place(&mut data).unwrap()
+    ///     .finalize().unwrap();
+    ///
+    /// // be sure to keep the tag around! important!
+    ///
+    /// // On decryption, we **must** ensure that the resulting tag matches
+    /// // the provided tag.
+    ///
+    /// let d_tag = ChaCha20Poly1305::new_decrypt(key, iv)
+    ///     .set_aad("additional data").unwrap()
+    ///     .update_in_place(&mut data).unwrap()
+    ///     .finalize().unwrap();
+    ///
+    /// assert_eq!(data, [0u8; 64]);
+    ///
+    /// // most importantly!
+    /// assert_eq!(tag, d_tag);
+    /// ```
     pub fn finalize(mut self) -> Result<Tag, Unspecified> {
         let mut tag = Tag::new_zeroed();
         let mut res = Res::new();
@@ -334,7 +1136,6 @@ mod tests {
     use crate::mac::poly1305::Key;
     use core::{
         slice,
-        ptr
     };
     use super::*;
 

@@ -57,8 +57,11 @@ macro_rules! opaque_dbg {
     };
     ($struct:ident <$($param:ident),*>) => {
         impl ::core::fmt::Debug for $struct <$($param),*> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str(concat!(stringify!($struct), "<", $(stringify!($param)),*, ">"))
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::Formatter::write_str(
+                    f,
+                    concat!(stringify!($struct), "<", $(stringify!($param)),*, ">")
+                )
             }
         }
     }

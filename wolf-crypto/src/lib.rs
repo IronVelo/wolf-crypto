@@ -45,7 +45,11 @@ mod sealed;
 pub mod aes;
 pub mod hash;
 mod error;
-pub mod chacha;
+
+non_fips! { // unfortunate
+    pub mod chacha;
+}
+
 pub mod aead;
 pub mod mac;
 

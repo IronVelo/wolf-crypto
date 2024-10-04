@@ -1,6 +1,7 @@
-use crate::{can_cast_u32, to_u32};
-use crate::sealed::Sealed;
+use crate::{can_cast_u32, const_can_cast_u32, to_u32};
+use crate::sealed::AadSealed as Sealed;
 use core::fmt;
+
 
 /// A generic representation of additional authenticated data (AAD)
 pub unsafe trait Aad: Sealed {
@@ -161,6 +162,60 @@ unsafe impl<'a> Aad for &'a [u8] {
     #[inline]
     fn is_valid_size(&self) -> bool {
         can_cast_u32(self.len())
+    }
+}
+
+impl<'a, const C: usize> Sealed for &'a [u8; C] {}
+
+unsafe impl<'a, const C: usize> Aad for &'a [u8; C] {
+    #[inline]
+    fn try_size(&self) -> Option<u32> {
+        if const_can_cast_u32::<C>() {
+            Some(C as u32)
+        } else {
+            None
+        }
+    }
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        self.as_ptr()
+    }
+    #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
+    unsafe fn size(&self) -> u32 {
+        debug_assert!(const_can_cast_u32::<C>());
+         C as u32
+    }
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        const_can_cast_u32::<C>()
+    }
+}
+
+impl<const C: usize> Sealed for [u8; C] {}
+
+unsafe impl<const C: usize> Aad for [u8; C] {
+    #[inline]
+    fn try_size(&self) -> Option<u32> {
+        if const_can_cast_u32::<C>() {
+            Some(C as u32)
+        } else {
+            None
+        }
+    }
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        self.as_ptr()
+    }
+    #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
+    unsafe fn size(&self) -> u32 {
+        debug_assert!(const_can_cast_u32::<C>());
+        C as u32
+    }
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        const_can_cast_u32::<C>()
     }
 }
 
