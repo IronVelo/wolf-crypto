@@ -16,7 +16,6 @@ std = []
 alloc = []
 can-panic = []
 allow-non-fips = []
-
 llvm-assume = []
 
 default = ["can-panic", "allow-non-fips"]
