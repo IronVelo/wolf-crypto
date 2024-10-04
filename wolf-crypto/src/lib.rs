@@ -1,6 +1,5 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
-#![cfg_attr(not(test), no_builtins)]
 #![warn(
     clippy::pedantic,
     clippy::nursery,
@@ -28,7 +27,10 @@
 
 #[cfg(any(test, feature = "alloc"))]
 extern crate alloc;
-extern crate core;
+
+#[cfg(test)]
+extern crate std;
+// extern crate core;
 
 #[macro_use]
 mod macros;
@@ -48,6 +50,7 @@ pub mod aead;
 pub mod mac;
 
 pub use error::Unspecified;
+pub use error::MakeOpaque;
 
 #[must_use]
 pub(crate) const fn const_can_cast_u32<const S: usize>() -> bool {
