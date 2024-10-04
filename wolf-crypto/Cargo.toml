@@ -16,12 +16,15 @@ std = []
 alloc = []
 can-panic = []
 allow-non-fips = []
+
+llvm-assume = []
+
 default = ["can-panic", "allow-non-fips"]
 
 [dependencies]
 wolf-crypto-sys = { version = "0.1.0-alpha.3" }
 # wolf-crypto-sys = { path = "../wolf-crypto-sys" }
-zeroize = { version = "1.7.0" }
+zeroize = { version = "1.8.1" }
 
 [dev-dependencies]
 aes-gcm = "0.10.3"
@@ -45,7 +48,14 @@ hex = "0.4.3"
 name = "aes-gcm"
 harness = false
 
+[[bench]]
+name = "chacha20_poly1305"
+harness = false
+
 [package.metadata.docs.rs]
 all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
