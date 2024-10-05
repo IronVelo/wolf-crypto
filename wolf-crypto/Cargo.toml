@@ -12,7 +12,7 @@ readme = "README.md"
 description = "Safe and thin API for wolfSSL's wolfcrypt"
 
 [features]
-std = []
+std = ["alloc"]
 alloc = []
 can-panic = []
 allow-non-fips = []
@@ -24,6 +24,7 @@ default = ["can-panic", "allow-non-fips"]
 wolf-crypto-sys = { version = "0.1.0-alpha.3" }
 # wolf-crypto-sys = { path = "../wolf-crypto-sys" }
 zeroize = { version = "1.8.1" }
+embedded-io = { version = "0.6.1", optional = true }
 
 [dev-dependencies]
 aes-gcm = "0.10.3"
