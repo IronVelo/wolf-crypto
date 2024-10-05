@@ -95,6 +95,13 @@ pub enum Key {
 
 basic_key_api! { Key }
 
+arb_key! {
+    enum Key {
+        B128([u8; 16]),
+        B256([u8; 32])
+    }
+}
+
 impl Key {
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
@@ -197,3 +204,4 @@ impl<'kr> GenericKey for &'kr [u8; 32] {
         32
     }
 }
+

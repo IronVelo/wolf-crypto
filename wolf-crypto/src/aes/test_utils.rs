@@ -250,12 +250,13 @@ impl<const C: usize> Arbitrary for BoundList<C> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-pub struct AnyList<const C: usize, T> {
+#[derive(Copy, Clone)]
+pub struct AnyList<const C: usize, T: Copy> {
     inner: [MaybeUninit<T>; C],
     len: usize
 }
 
-impl<const C: usize, T: fmt::Debug> fmt::Debug for AnyList<C, T> {
+impl<const C: usize, T: fmt::Debug + Copy> fmt::Debug for AnyList<C, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut dbg = f.debug_struct("AnyList");
         dbg.field("len", &self.len());
@@ -282,7 +283,7 @@ impl<const C: usize, T: Copy> AnyList<C, T> {
     }
 }
 
-impl<const C: usize, T> AnyList<C, T> {
+impl<const C: usize, T: Copy> AnyList<C, T> {
     pub const fn len(&self) -> usize {
         self.len
     }
@@ -298,7 +299,36 @@ impl<const C: usize, T> AnyList<C, T> {
     }
 }
 
-impl<const C: usize, T> ops::Deref for AnyList<C, T> {
+impl<const C: usize, const B: usize> AnyList<C, BoundList<B>> {
+    pub fn create_self(&self) -> Self {
+        let mut copied = *self;
+
+        for c in copied.as_mut_slice() {
+            *c = c.create_self();
+        }
+
+        copied
+    }
+
+    pub fn join(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity((C * B) / 2);
+
+        for e in self.as_slice() {
+            out.extend_from_slice(e.as_slice());
+        }
+
+        out
+    }
+}
+
+impl<const C: usize, T: PartialEq + Copy> PartialEq for AnyList<C, T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl<const C: usize, T: Copy> ops::Deref for AnyList<C, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -306,7 +336,7 @@ impl<const C: usize, T> ops::Deref for AnyList<C, T> {
     }
 }
 
-impl<const C: usize, T> ops::DerefMut for AnyList<C, T> {
+impl<const C: usize, T: Copy> ops::DerefMut for AnyList<C, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.as_mut_slice()
     }

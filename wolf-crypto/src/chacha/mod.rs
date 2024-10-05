@@ -16,7 +16,6 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use crate::buf::{GenericIv, U12};
-use crate::opaque_res::Res;
 use crate::{can_cast_u32, const_can_cast_u32, lte, Unspecified};
 use state::{State, CanProcess, Init, NeedsIv, Ready, Streaming};
 
@@ -239,28 +238,73 @@ impl<S: CanProcess> ChaCha20<S> {
     ///
     /// * `input` - The input slice to process.
     /// * `output` - The output buffer to write the processed data into.
-    ///
-    /// # Returns
-    ///
-    /// A `Res` indicating the success or failure of the operation.
     #[inline]
-    unsafe fn process_unchecked(&mut self, input: &[u8], output: &mut [u8]) -> Res {
+    unsafe fn process_unchecked(&mut self, input: &[u8], output: &mut [u8]) {
         debug_assert!(
             Self::predicate(input.len(), output.len()),
             "Process unchecked precondition violated (debug assertion). The size of the input must \
             be less than or equal to the size of the output. The size of the input must also be \
             representable as a `u32` without overflowing."
         );
-        let mut res = Res::new();
 
-        res.ensure_0(wc_Chacha_Process(
+        // INFALLIBLE (with preconditions respected, but this function is unsafe so caller's
+        // responsibility)
+        //
+        // -- ACTUAL PROCESSING:
+        // https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/chacha.c#L267
+        //
+        // Returns void, so of course, no fallibility here (which makes sense).
+        //
+        // -- PROCESS FUNCTION
+        // https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/chacha.c#L317
+        //
+        // The null checks at the start of wc_ChaCha_Process are the only fallible aspects, with
+        // the length corresponding to the input size and the output size being greater or eq to
+        // this length implied.
+        let _res = wc_Chacha_Process(
             addr_of_mut!(self.inner),
             output.as_mut_ptr(),
             input.as_ptr(),
             input.len() as u32
-        ));
+        );
 
-        res
+        debug_assert_eq!(_res, 0);
+    }
+
+    /// Processes the input into the output buffer without checking lengths.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not check if the input and output
+    /// lengths are valid. The caller must ensure that the input length can be cast to a `u32`
+    /// without overflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - The buffer to process in-place.
+    #[inline]
+    unsafe fn process_in_place_unchecked<'io>(&mut self, in_out: &'io mut [u8]) -> &'io [u8] {
+        debug_assert!(
+            can_cast_u32(in_out.len()),
+            "Process unchecked precondition violated (debug assertion). The size of the input must \
+            be less than or equal to the size of the output. The size of the input must also be \
+            representable as a `u32` without overflowing."
+        );
+
+        // The soundness of passing the input ptr as the output ptr is implied by this being sound
+        // in ChaCha20Poly1305.
+        //
+        // The infallibility explanation can be seen in the process_unchecked implementation.
+        let _res = wc_Chacha_Process(
+            addr_of_mut!(self.inner),
+            in_out.as_ptr().cast_mut(),
+            in_out.as_ptr(),
+            in_out.len() as u32
+        );
+
+        debug_assert_eq!(_res, 0);
+
+        in_out
     }
 
     /// Processes the input into the output buffer, checking lengths.
@@ -270,13 +314,32 @@ impl<S: CanProcess> ChaCha20<S> {
     /// * `input` - The input slice to process.
     /// * `output` - The output buffer to write the processed data into.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// `!(input_len <= output_len && can_cast_u32(input_len))`
     #[inline]
-    fn process(&mut self, input: &[u8], output: &mut [u8]) -> Res {
-        if !Self::predicate(input.len(), output.len()) { return Res::ERR }
-        unsafe { self.process_unchecked(input, output) }
+    fn process(&mut self, input: &[u8], output: &mut [u8]) -> Result<(), Unspecified> {
+        if !Self::predicate(input.len(), output.len()) { return Err(Unspecified) }
+        unsafe { self.process_unchecked(input, output) };
+        Ok(())
+    }
+
+    /// Encrypt / Decrypt the data in-place
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - The buffer to encrypt / decrypt in-place
+    ///
+    /// # Errors
+    ///
+    /// `!can_cast_u32(in_out.len())`
+    #[inline]
+    fn process_in_place<'io>(&mut self, in_out: &'io mut [u8]) -> Result<&'io [u8], Unspecified> {
+        if can_cast_u32(in_out.len()) {
+            Ok(unsafe { self.process_in_place_unchecked(in_out) })
+        } else {
+            Err(Unspecified)
+        }
     }
 
     /// Processes the input into the output buffer with exact sizes.
@@ -286,17 +349,18 @@ impl<S: CanProcess> ChaCha20<S> {
     /// * `input` - The input array to process.
     /// * `output` - The output array to write the processed data into.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// `!const_can_cast_u32::<C>()`
     #[inline]
     fn process_exact<const C: usize>(
         &mut self,
         input: &[u8; C],
         output: &mut [u8; C]
-    ) -> Res {
-        if !const_can_cast_u32::<C>() { return Res::ERR; }
-        unsafe { self.process_unchecked(input, output) }
+    ) -> Result<(), Unspecified> {
+        if !const_can_cast_u32::<C>() { return Err(Unspecified); }
+        unsafe { self.process_unchecked(input, output) };
+        Ok(())
     }
 
     /// Processes the input into the output buffer with compile-time size checking.
@@ -311,17 +375,38 @@ impl<S: CanProcess> ChaCha20<S> {
     /// * `input` - The input array to process.
     /// * `output` - The output array to write the processed data into.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// `!(I <= O && const_can_cast_u32::<I>())`
     #[inline]
     fn process_sized<const I: usize, const O: usize>(
         &mut self,
         input: &[u8; I],
         output: &mut [u8; O]
-    ) -> Res {
-        if !Self::const_predicate::<I, O>() { return Res::ERR }
-        unsafe { self.process_unchecked(input, output) }
+    ) -> Result<(), Unspecified> {
+        if !Self::const_predicate::<I, O>() { return Err(Unspecified) }
+        unsafe { self.process_unchecked(input, output) };
+        Ok(())
+    }
+
+    /// Encrypt / Decrypt the `in_out` buffer in-place, with safety checks performed at compilation
+    /// time.
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - The buffer to encrypt/decrypt in-place
+    ///
+    /// # Errors
+    ///
+    /// `!const_can_cast_u32::<C>()`
+    #[inline]
+    fn process_in_place_sized<'io, const C: usize>(&mut self, in_out: &'io mut [u8; C]) -> Result<&'io [u8; C], Unspecified> {
+        if const_can_cast_u32::<C>() {
+            unsafe { self.process_in_place_unchecked(in_out) };
+            Ok(in_out)
+        } else {
+            Err(Unspecified)
+        }
     }
 
     /// Processes the input into the output buffer with a fixed-size output.
@@ -335,17 +420,18 @@ impl<S: CanProcess> ChaCha20<S> {
     /// * `input` - The input slice to process.
     /// * `output` - The output array to write the processed data into.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// `!(lte::<O>(input.len()) && can_cast_u32(input.len()))`
     #[inline]
     fn process_sized_out<const O: usize>(
         &mut self,
         input: &[u8],
         output: &mut [u8; O]
-    ) -> Res {
-        if !(lte::<O>(input.len()) && can_cast_u32(input.len())) { return Res::ERR }
-        unsafe { self.process_unchecked(input, output) }
+    ) -> Result<(), Unspecified> {
+        if !(lte::<O>(input.len()) && can_cast_u32(input.len())) { return Err(Unspecified) }
+        unsafe { self.process_unchecked(input, output) };
+        Ok(())
     }
 }
 
@@ -355,48 +441,87 @@ impl ChaCha20<Ready> {
     /// # Arguments
     ///
     /// * `plain` - The plaintext to encrypt.
-    /// * `ciphertext` - The buffer to store the encrypted data.
+    /// * `cipher` - The buffer to store the encrypted data.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Result` containing either the `ChaCha20` instance in the `NeedsIv` state
-    /// on success, or the original instance on failure.
+    /// - The length of `plain` was greater than [`u32::MAX`]
+    /// - The length of `cipher` was less than the length of `plain`
     #[inline]
     pub fn encrypt_into(
         mut self,
         plain: &[u8],
-        ciphertext: &mut [u8]
+        cipher: &mut [u8]
     ) -> Result<ChaCha20<NeedsIv>, Self> {
-        if self.process(plain, ciphertext).is_ok() {
+        if self.process(plain, cipher).is_ok() {
             Ok(Self::new_with(self.inner))
         } else {
             Err(self)
         }
     }
 
-    /// Encrypts the plaintext into the ciphertext buffer with compile-time size checking.
+    /// Encrypts the plaintext in-place.
     ///
-    /// # Type Parameters
+    /// # Arguments
     ///
-    /// * `P` - The size of the plaintext array.
-    /// * `C` - The size of the ciphertext array.
+    /// * `in_out` - The buffer to encrypt in-place.
+    ///
+    /// # Errors
+    ///
+    /// The length of `in_out` was greater than [`u32::MAX`].
+    #[inline]
+    pub fn encrypt_in_place(mut self, in_out: &mut [u8]) -> Result<ChaCha20<NeedsIv>, Self> {
+        if self.process_in_place(in_out).is_ok() {
+            Ok(Self::new_with(self.inner))
+        } else {
+            Err(self)
+        }
+    }
+
+    /// Encrypts the plaintext into the ciphertext buffer with compile-time safety checks.
     ///
     /// # Arguments
     ///
     /// * `plain` - The plaintext array to encrypt.
-    /// * `ciphertext` - The array to store the encrypted data.
+    /// * `cipher` - The array to store the encrypted data.
     ///
     /// # Returns
     ///
-    /// A `Result` containing either the `ChaCha20` instance in the `NeedsIv` state
-    /// on success, or the original instance on failure.
+    /// `ChaCha20` instance in the `NeedsIv` state.
+    ///
+    /// # Errors
+    ///
+    /// - The length of `plain` was greater than [`u32::MAX`].
+    /// - The length of `cipher` was less than the length of `plain`.
     #[inline]
     pub fn encrypt_into_sized<const P: usize, const C: usize>(
         mut self,
         plain: &[u8; P],
-        ciphertext: &mut [u8; C]
+        cipher: &mut [u8; C]
     ) -> Result<ChaCha20<NeedsIv>, Self> {
-        if self.process_sized(plain, ciphertext).is_ok() {
+        if self.process_sized(plain, cipher).is_ok() {
+            Ok(Self::new_with(self.inner))
+        } else {
+            Err(self)
+        }
+    }
+
+    /// Encrypts the plaintext in-place with compile-time safety checks.
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - The plaintext to encrypt in-place.
+    ///
+    /// # Returns
+    ///
+    /// `ChaCha20` instance in the `NeedsIv` state.
+    ///
+    /// # Errors
+    ///
+    /// The length of `in_out` was greater than [`u32::MAX`].
+    #[inline]
+    pub fn encrypt_in_place_sized<const C: usize>(mut self, in_out: &mut [u8; C]) -> Result<ChaCha20<NeedsIv>, Self> {
+        if self.process_in_place_sized(in_out).is_ok() {
             Ok(Self::new_with(self.inner))
         } else {
             Err(self)
@@ -405,26 +530,26 @@ impl ChaCha20<Ready> {
 
     /// Encrypts the plaintext into a fixed-size ciphertext buffer.
     ///
-    /// # Type Parameters
-    ///
-    /// * `C` - The size of the ciphertext array.
-    ///
     /// # Arguments
     ///
     /// * `plain` - The plaintext to encrypt.
-    /// * `ciphertext` - The array to store the encrypted data.
+    /// * `cipher` - The array to store the encrypted data.
     ///
     /// # Returns
     ///
-    /// A `Result` containing either the `ChaCha20` instance in the `NeedsIv` state
-    /// on success, or the original instance on failure.
+    /// `ChaCha20` instance in the `NeedsIv` state.
+    ///
+    /// # Errors
+    ///
+    /// - The length of `plain` was greater than [`u32::MAX`].
+    /// - The length of `cipher` was less than the length of `plain`.
     #[inline]
     pub fn encrypt_into_sized_out<const C: usize>(
         mut self,
         plain: &[u8],
-        ciphertext: &mut [u8; C]
+        cipher: &mut [u8; C]
     ) -> Result<ChaCha20<NeedsIv>, Self> {
-        if self.process_sized_out(plain, ciphertext).is_ok() {
+        if self.process_sized_out(plain, cipher).is_ok() {
             Ok(Self::new_with(self.inner))
         } else {
             Err(self)
@@ -433,26 +558,25 @@ impl ChaCha20<Ready> {
 
     /// Encrypts the plaintext into the ciphertext buffer with exact sizes.
     ///
-    /// # Type Parameters
-    ///
-    /// * `C` - The size of both the plaintext and ciphertext arrays.
-    ///
     /// # Arguments
     ///
     /// * `plain` - The plaintext array to encrypt.
-    /// * `ciphertext` - The array to store the encrypted data.
+    /// * `cipher` - The array to store the encrypted data.
     ///
     /// # Returns
     ///
-    /// A `Result` containing either the `ChaCha20` instance in the `NeedsIv` state
-    /// on success, or the original instance on failure.
+    /// `ChaCha20` instance in the `NeedsIv` state.
+    ///
+    /// # Errors
+    ///
+    /// If `C` (the length of `plain` and `cipher`) was greater than [`u32::MAX`].
     #[inline]
     pub fn encrypt_into_exact<const C: usize>(
         mut self,
         plain: &[u8; C],
-        ciphertext: &mut [u8; C]
+        cipher: &mut [u8; C]
     ) -> Result<ChaCha20<NeedsIv>, Self> {
-        if self.process_exact(plain, ciphertext).is_ok() {
+        if self.process_exact(plain, cipher).is_ok() {
             Ok(Self::new_with(self.inner))
         } else {
             Err(self)
@@ -460,23 +584,26 @@ impl ChaCha20<Ready> {
     }
 
     alloc! {
-    /// Encrypts the plaintext and returns the ciphertext as a vector.
-    ///
-    /// # Arguments
-    ///
-    /// * `plain` - The plaintext to encrypt.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing either a tuple of the ciphertext vector and the `ChaCha20`
-    /// instance in the `NeedsIv` state on success, or the original instance on failure.
-    pub fn encrypt(
-        self,
-        plain: &[u8]
-    ) -> Result<(alloc::vec::Vec<u8>, ChaCha20<NeedsIv>), Self> {
-        let mut output = alloc::vec![0u8; plain.len()];
-        self.encrypt_into(plain, output.as_mut_slice()).map(move |ni| (output, ni))
-    }
+        /// Encrypts the plaintext and returns the ciphertext as a vector.
+        ///
+        /// # Arguments
+        ///
+        /// * `plain` - The plaintext to encrypt.
+        ///
+        /// # Returns
+        ///
+        /// `ChaCha20` instance in the `NeedsIv` state.
+        ///
+        /// # Errors
+        ///
+        /// The length of `plain` was greater than [`u32::MAX`].
+        pub fn encrypt(
+            self,
+            plain: &[u8]
+        ) -> Result<(alloc::vec::Vec<u8>, ChaCha20<NeedsIv>), Self> {
+            let mut output = alloc::vec![0u8; plain.len()];
+            self.encrypt_into(plain, output.as_mut_slice()).map(move |ni| (output, ni))
+        }
     }
 
     /// Encrypts the plaintext array and returns the ciphertext array.
@@ -491,8 +618,11 @@ impl ChaCha20<Ready> {
     ///
     /// # Returns
     ///
-    /// A `Result` containing either a tuple of the ciphertext array and the `ChaCha20`
-    /// instance in the `NeedsIv` state on success, or the original instance on failure.
+    /// `ChaCha20` instance in the `NeedsIv` state.
+    ///
+    /// # Errors
+    ///
+    /// The length of `plain` was greater than [`u32::MAX`].
     #[inline]
     pub fn encrypt_exact<const I: usize>(
         self,
@@ -500,6 +630,10 @@ impl ChaCha20<Ready> {
     ) -> Result<([u8; I], ChaCha20<NeedsIv>), Self> {
         let mut output = [0u8; I];
         self.encrypt_into_exact(plain, &mut output).map(move |ni| (output, ni))
+    }
+
+    pub const fn stream(self) -> ChaCha20<Streaming> {
+        Self::new_with(self.inner)
     }
 }
 
@@ -511,95 +645,126 @@ impl<S: CanProcess> ChaCha20<S> {
     /// # Arguments
     ///
     /// * `cipher` - The ciphertext to decrypt.
-    /// * `output` - The buffer to store the decrypted data.
+    /// * `plain` - The buffer to store the decrypted data.
+    ///
+    /// # Errors
+    ///
+    /// - If the length of `cipher` is greater than [`u32::MAX`].
+    /// - If the length of `cipher` is greater than the length of `plain`.
+    #[inline]
+    pub fn decrypt_into(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<(), Unspecified> {
+        self.process(cipher, plain)
+    }
+
+    /// Decrypts the ciphertext in-place.
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - The plaintext to decrypt in place.
+    ///
+    /// # Errors
+    ///
+    /// If the length of `in_out` is greater than [`u32::MAX`].
     ///
     /// # Returns
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// The `in_out` argument, decrypted, for convenience. This can be ignored.
     #[inline]
-    pub fn decrypt_into(&mut self, cipher: &[u8], output: &mut [u8]) -> Res {
-        self.process(cipher, output)
+    pub fn decrypt_in_place<'io>(&mut self, in_out: &'io mut [u8]) -> Result<&'io [u8], Unspecified> {
+        self.process_in_place(in_out)
     }
 
-    /// Decrypts the ciphertext into the output buffer with compile-time size checking.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `I` - The size of the ciphertext array.
-    /// * `O` - The size of the output array.
+    /// Decrypts the ciphertext into the output buffer with compile-time safety checks.
     ///
     /// # Arguments
     ///
     /// * `cipher` - The ciphertext array to decrypt.
-    /// * `output` - The array to store the decrypted data.
+    /// * `plain` - The array to store the decrypted data.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// - If the length of `cipher` is greater than [`u32::MAX`].
+    /// - If the length of `cipher` is greater than the length of `plain`.
     #[inline]
     pub fn decrypt_into_sized<const I: usize, const O: usize>(
         &mut self,
         cipher: &[u8; I],
-        output: &mut [u8; O]
-    ) -> Res {
-        self.process_sized(cipher, output)
+        plain: &mut [u8; O]
+    ) -> Result<(), Unspecified> {
+        self.process_sized(cipher, plain)
+    }
+
+    /// Decrypts the ciphertext in-place with compile-time safety checks.
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - The ciphertext to decrypt in-place.
+    ///
+    /// # Returns
+    ///
+    /// `ChaCha20` instance in the `NeedsIv` state.
+    ///
+    /// # Errors
+    ///
+    /// - The length of `in_out` was greater than [`u32::MAX`].
+    #[inline]
+    pub fn decrypt_in_place_sized<'io, const C: usize>(
+        &mut self,
+        in_out: &'io mut [u8; C]
+    ) -> Result<&'io [u8; C], Unspecified> {
+        self.process_in_place_sized(in_out)
     }
 
     /// Decrypts the ciphertext into the output buffer with exact sizes.
     ///
-    /// # Type Parameters
-    ///
-    /// * `C` - The size of both the ciphertext and output arrays.
-    ///
     /// # Arguments
     ///
     /// * `cipher` - The ciphertext array to decrypt.
-    /// * `output` - The array to store the decrypted data.
+    /// * `plain` - The array to store the decrypted data.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// If `C` (the length of `cipher` and `plain`) is greater than [`u32::MAX`].
     #[inline]
-    pub fn decrypt_into_exact<const C: usize>(&mut self, cipher: &[u8; C], output: &mut [u8; C]) -> Res {
-        self.process_exact(cipher, output)
+    pub fn decrypt_into_exact<const C: usize>(&mut self, cipher: &[u8; C], plain: &mut [u8; C]) -> Result<(), Unspecified> {
+        self.process_exact(cipher, plain)
     }
 
     alloc! {
-    /// Decrypts the ciphertext and returns the plaintext as a vector.
-    ///
-    /// # Arguments
-    ///
-    /// * `cipher` - The ciphertext to decrypt.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing either the decrypted plaintext as a vector on success,
-    /// or an `Unspecified` error on failure.
-    #[inline]
-    pub fn decrypt(&mut self, cipher: &[u8]) -> Result<alloc::vec::Vec<u8>, Unspecified> {
-        let mut output = alloc::vec![0u8; cipher.len()];
-        self.decrypt_into(cipher, output.as_mut_slice()).unit_err(output)
-    }
+        /// Decrypts the ciphertext and returns the plaintext as a vector.
+        ///
+        /// # Arguments
+        ///
+        /// * `cipher` - The ciphertext to decrypt.
+        ///
+        /// # Errors
+        ///
+        /// If the length of `cipher` is greater than [`u32::MAX`].
+        ///
+        /// # Returns
+        ///
+        /// A newly allocated buffer, the same length as `cipher`, containing the decrypted
+        /// plaintext.
+        #[inline]
+        pub fn decrypt(&mut self, cipher: &[u8]) -> Result<alloc::vec::Vec<u8>, Unspecified> {
+            let mut output = alloc::vec![0u8; cipher.len()];
+            self.decrypt_into(cipher, output.as_mut_slice()).map(move |()| output)
+        }
     }
 
     /// Decrypts the ciphertext array and returns the plaintext array.
     ///
-    /// # Type Parameters
-    ///
-    /// * `O` - The size of the ciphertext and plaintext arrays.
-    ///
     /// # Arguments
     ///
     /// * `cipher` - The ciphertext array to decrypt.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Result` containing either the decrypted plaintext array on success,
-    /// or an `Unspecified` error on failure.
+    /// If `O` (the length of `cipher`) is greater than [`u32::MAX`].
     #[inline]
     pub fn decrypt_exact<const O: usize>(&mut self, cipher: &[u8; O]) -> Result<[u8; O], Unspecified> {
         let mut output = [0u8; O];
-        self.decrypt_into_exact(cipher, &mut output).unit_err(output)
+        self.decrypt_into_exact(cipher, &mut output).map(move |()| output)
     }
 }
 
@@ -608,39 +773,35 @@ impl ChaCha20<Streaming> {
     ///
     /// # Arguments
     ///
-    /// * `input` - The input to encrypt.
-    /// * `output` - The buffer to store the encrypted data.
+    /// * `plain` - The input to encrypt.
+    /// * `cipher` - The buffer to store the encrypted data.
     ///
     /// # Returns
     ///
     /// A `Res` indicating the success or failure of the operation.
     #[inline]
-    pub fn encrypt_into(&mut self, input: &[u8], output: &mut [u8]) -> Res {
-        self.process(input, output)
+    pub fn encrypt_into(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<(), Unspecified> {
+        self.process(plain, cipher)
     }
 
     /// Encrypts the input into the output buffer in streaming mode with compile-time size checking.
     ///
-    /// # Type Parameters
-    ///
-    /// * `I` - The size of the input array.
-    /// * `O` - The size of the output array.
-    ///
     /// # Arguments
     ///
-    /// * `input` - The input array to encrypt.
-    /// * `output` - The array to store the encrypted data.
+    /// * `plain` - The input array to encrypt.
+    /// * `cipher` - The array to store the encrypted data.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// - The length of `plain` was greater than [`u32::MAX`].
+    /// - The length of `cipher` was less than the length of `plain`.
     #[inline]
     pub fn encrypt_into_sized<const I: usize, const O: usize>(
         &mut self,
-        input: &[u8; I],
-        output: &mut [u8; O]
-    ) -> Res {
-        self.process_sized(input, output)
+        plain: &[u8; I],
+        cipher: &mut [u8; O]
+    ) -> Result<(), Unspecified> {
+        self.process_sized(plain, cipher)
     }
 
     /// Encrypts the input into the output buffer in streaming mode with exact sizes.
@@ -654,15 +815,15 @@ impl ChaCha20<Streaming> {
     /// * `input` - The input array to encrypt.
     /// * `output` - The array to store the encrypted data.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// `C` (the length of `input` and `output`) was greater than [`u32::MAX`].
     #[inline]
     pub fn encrypt_into_exact<const C: usize>(
         &mut self,
         input: &[u8; C],
         output: &mut [u8; C]
-    ) -> Res {
+    ) -> Result<(), Unspecified> {
         self.process_exact(input, output)
     }
 
@@ -681,7 +842,6 @@ impl ChaCha20<Streaming> {
         ///
         /// # Type Parameters
         ///
-        /// * `W` - The type of the writer.
         /// * `CHUNK` - The chunk size for processing. This is the size of the intermediary buffer
         ///             stored on the stack in bytes for the `write_all` and `write`
         ///             implementations.
@@ -693,15 +853,16 @@ impl ChaCha20<Streaming> {
         /// # Returns
         ///
         /// A new `Writer` instance.
-        pub const fn writer<W: io::Write, const CHUNK: usize>(self, writer: W) -> Writer<W, CHUNK> {
+        ///
+        /// # Errors
+        ///
+        /// If the provided `CHUNK` constant is greater than U32 max this will return the provided
+        /// `writer`.
+        pub const fn writer<W: io::Write, const CHUNK: usize>(self, writer: W) -> Result<Writer<W, CHUNK>, W> {
             Writer::new(self, writer)
         }
 
         /// Creates a new `Writer` for streaming encryption with a default chunk size of 128 bytes.
-        ///
-        /// # Type Parameters
-        ///
-        /// * `W` - The type of the writer.
         ///
         /// # Arguments
         ///
@@ -711,7 +872,8 @@ impl ChaCha20<Streaming> {
         ///
         /// A new `Writer` instance with a chunk size of 128 bytes.
         pub const fn default_writer<W: io::Write>(self, writer: W) -> Writer<W, 128> {
-            Writer::new(self, writer)
+            // SAFETY: 128 is significantly less than u32::MAX
+            unsafe { Writer::<W, 128>::new_unchecked(self, writer) }
         }
     }
 }
@@ -742,7 +904,25 @@ std! {
         /// # Returns
         ///
         /// A new `Writer` instance.
-        pub const fn new(chacha: ChaCha20<Streaming>, writer: W) -> Self {
+        ///
+        /// # Errors
+        ///
+        /// If the size of `CHUNK` is greater than [`u32::MAX`]
+        pub const fn new(chacha: ChaCha20<Streaming>, writer: W) -> Result<Self, W> {
+            if const_can_cast_u32::<CHUNK>() {
+                Ok(Self {
+                    chacha,
+                    writer
+                })
+            } else {
+                Err(writer)
+            }
+        }
+
+        /// # Safety
+        ///
+        /// The size of `CHUNK` must not be greater than [`u32::MAX`]
+        const unsafe fn new_unchecked(chacha: ChaCha20<Streaming>, writer: W) -> Self {
             Self {
                 chacha,
                 writer
@@ -796,10 +976,8 @@ std! {
             let mut out = [0u8; CHUNK];
             let to_write = core::cmp::min(CHUNK, buf.len());
 
-            if unsafe { self.process_unchecked(&buf[..to_write], &mut out[..to_write]).is_err() } {
-                return Err(io::Error::other(Unspecified))
-            }
-
+            // SAFETY: we cannot be constructed with a chunk size larger than u32::MAX
+            unsafe { self.process_unchecked(&buf[..to_write], &mut out[..to_write]) };
             self.writer.write(&out[..to_write])
         }
 
@@ -819,20 +997,18 @@ std! {
 
             while pos + CHUNK <= len {
                 unsafe {
-                    if self.process_unchecked(&buf[pos..pos + CHUNK], &mut out).is_err() {
-                        return Err(io::Error::other(Unspecified));
-                    }
+                    // SAFETY: we cannot be constructed with a chunk size larger than u32::MAX
+                    self.process_unchecked(&buf[pos..pos + CHUNK], &mut out);
                     pos += CHUNK;
                     self.writer.write_all(&out)?;
                 }
             }
 
             let last = &buf[pos..];
+            debug_assert!(last.len() <= CHUNK);
 
-            if unsafe { self.process_unchecked(last, &mut out).is_err() } {
-                return Err(io::Error::other(Unspecified));
-            }
-
+            // SAFETY: We are handling less than the CHUNK size.
+            unsafe { self.process_unchecked(last, &mut out) }
             self.writer.write_all(&out[..last.len()])
         }
 
@@ -865,5 +1041,116 @@ mod tests {
             .unwrap();
 
         assert_eq!(plain, *b"hello world!");
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    use crate::aes::test_utils::{BoundList, AnyList};
+    use proptest::prelude::*;
+    use crate::chacha::{ChaCha20, Key};
+    use crate::buf::Nonce;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10_000))]
+
+        #[test]
+        fn in_place_bijectivity(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>()
+        ) {
+            let mut in_out = input;
+
+            ChaCha20::new(key.as_ref())
+                .set_iv(iv.copy())
+                .encrypt_in_place(in_out.as_mut_slice())
+                .unwrap();
+
+            if in_out.len() >= 3 {
+                prop_assert_ne!(in_out, input);
+            }
+
+            ChaCha20::new(key)
+                .set_iv(iv)
+                .decrypt_in_place(in_out.as_mut_slice())
+                .unwrap();
+
+            prop_assert_eq!(in_out, input);
+        }
+
+        #[test]
+        fn enc_into_dec_in_place(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>()
+        ) {
+            let mut enc = input.create_self();
+
+            ChaCha20::new(key.as_ref()).set_iv(iv.copy())
+                .encrypt_into(input.as_slice(), enc.as_mut_slice())
+                .unwrap();
+
+            if enc.len() >= 3 {
+                prop_assert_ne!(enc.as_slice(), input.as_slice());
+            }
+
+            ChaCha20::new(key.as_ref()).set_iv(iv)
+                .decrypt_in_place(enc.as_mut_slice())
+                .unwrap();
+
+            prop_assert_eq!(enc, input);
+        }
+
+        #[test]
+        fn enc_in_place_dec_into(
+            input in any::<BoundList<1024>>(),
+            key in any::<Key>(),
+            iv in any::<Nonce>()
+        ) {
+            let mut enc = input;
+
+            ChaCha20::new(key.as_ref()).set_iv(iv.copy())
+                .encrypt_in_place(enc.as_mut_slice())
+                .unwrap();
+
+            if enc.len() >= 3 {
+                prop_assert_ne!(enc.as_slice(), input.as_slice());
+            }
+
+            let mut dec = input.create_self();
+
+            ChaCha20::new(key.as_ref()).set_iv(iv)
+                .decrypt_into(enc.as_slice(), dec.as_mut_slice())
+                .unwrap();
+
+            prop_assert_eq!(dec, input);
+        }
+
+        #[test]
+        fn bijective_arb_updates(
+            inputs in any::<AnyList<32, BoundList<512>>>(),
+            key in any::<Key>(),
+            iv in any::<[u8; 12]>()
+        ) {
+            let mut outputs = inputs.create_self();
+
+            let io_iter = inputs.as_slice().iter().zip(outputs.as_mut_slice());
+            let mut chacha = ChaCha20::new(key.as_ref()).set_iv(&iv).stream();
+
+            for (i, o) in io_iter {
+                chacha.encrypt_into(i, o).unwrap();
+                if i.len() >= 3 { prop_assert_ne!(i.as_slice(), o.as_slice()); }
+            }
+
+            let mut in_out = outputs.join();
+            let expected = inputs.join();
+
+            ChaCha20::new(key).set_iv(iv)
+                .decrypt_in_place(in_out.as_mut_slice())
+                .unwrap();
+
+            prop_assert_eq!(in_out, expected);
+        }
     }
 }

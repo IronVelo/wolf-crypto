@@ -47,6 +47,26 @@ macro_rules! panic_api {
     };
 }
 
+macro_rules! no_std_io {
+    ($($item:item)*) => {
+        $(
+            #[cfg_attr(docsrs, doc(cfg(feature = "embedded-io")))]
+            #[cfg(feature = "embedded-io")]
+            $item
+        )*
+    }
+}
+
+macro_rules! io_impls {
+    ($($item:item)*) => {
+        $(
+            #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "embedded-io"))))]
+            #[cfg(any(feature = "std", feature = "embedded-io"))]
+            $item
+        )*
+    };
+}
+
 macro_rules! opaque_dbg {
     ($struct:ident $(<$lt:lifetime>)?) => {
         impl $(<$lt>)? ::core::fmt::Debug for $struct $(<$lt>)? {
@@ -123,4 +143,25 @@ macro_rules! arb_key {
             }
         }
     };
+    (enum $ident:ident {
+        $(
+            $variant:ident ([u8; $sz:literal])
+        ),*
+        $(,)?
+    }) => {
+        #[cfg(test)]
+        impl ::proptest::arbitrary::Arbitrary for $ident {
+            type Parameters = ();
+
+            fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+                use ::proptest::strategy::Strategy as _;
+
+                ::proptest::prop_oneof![
+                    $(::proptest::prelude::any::<[u8; $sz]>().prop_map(Self::$variant)),*
+                ].boxed()
+            }
+
+            type Strategy = ::proptest::strategy::BoxedStrategy<Self>;
+        }
+    }
 }

@@ -53,6 +53,14 @@
 
 pub mod states;
 
+io_impls! {
+    #[doc(hidden)]
+    pub mod io;
+
+    #[doc(inline)]
+    pub use io::Aad as IoAad;
+}
+
 use wolf_crypto_sys::{
     ChaChaPoly_Aead,
     wc_ChaCha20Poly1305_UpdateData, wc_ChaCha20Poly1305_UpdateAad,
@@ -675,7 +683,7 @@ impl<S: State> ChaCha20Poly1305<S> {
     ///
     /// A new `ChaCha20Poly1305` instance with the updated state.
     #[inline]
-    const fn with_state<N: State>(self) -> ChaCha20Poly1305<N> {
+    pub(crate) const fn with_state<N: State>(self) -> ChaCha20Poly1305<N> {
         // SAFETY: we're just updating the phantom data state, same everything
         unsafe { core::mem::transmute(self) }
     }
@@ -720,6 +728,13 @@ impl<S: CanUpdateAad> ChaCha20Poly1305<S> {
         );
 
         debug_assert_eq!(_res, 0);
+    }
+
+    io_impls! {
+        #[inline]
+        pub const fn aad_io<IO>(self, io: IO) -> IoAad<S::Updating, IO> {
+            io::Aad::new(self.with_state(), io)
+        }
     }
 
     /// Update the underlying message authentication code without encrypting the data.
@@ -1067,6 +1082,48 @@ impl<S: UpdatingAad> ChaCha20Poly1305<S> {
     pub const fn finish(self) -> ChaCha20Poly1305<S::Mode> {
         self.with_state()
     }
+
+    /// Update the underlying message authentication code without encrypting the data or taking
+    /// ownership of the [`ChaCha20Poly1305`] instance.
+    ///
+    /// This method is only available in the streaming state, making partial updates less of a
+    /// hassle.
+    ///
+    /// # Arguments
+    ///
+    /// * `aad` - The additional authenticated data to include in the authentication [`Tag`].
+    ///
+    /// # Errors
+    ///
+    /// If the length of the AAD is greater than [`u32::MAX`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{aead::chacha20_poly1305::{ChaCha20Poly1305, Key}, MakeOpaque};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let tag = ChaCha20Poly1305::new_encrypt(Key::new([7u8; 32]), [42u8; 12])
+    ///     .set_aad("hello world! Beautiful weather.")
+    ///     .opaque_bind(|aead| aead.finalize())?;
+    ///
+    /// let mut d_cipher = ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [42u8; 12])
+    ///     .update_aad("hello world").opaque()?;
+    ///
+    /// // does not take ownership
+    /// d_cipher.update_aad_streaming("! ")?;
+    /// d_cipher.update_aad_streaming("Beautiful weather.")?;
+    ///
+    /// let d_tag = d_cipher.finish().finalize().opaque()?;
+    ///
+    /// assert_eq!(tag, d_tag);
+    /// # Ok(()) }
+    /// ```
+    pub fn update_aad_streaming<A: Aad>(&mut self, aad: A) -> Result<(), Unspecified> {
+        if !aad.is_valid_size() { return Err(Unspecified) }
+        unsafe { self.update_aad_unchecked(aad); }
+        Ok(())
+    }
 }
 
 impl<S: Updating> ChaCha20Poly1305<S> {
@@ -1128,6 +1185,19 @@ impl<S: Updating> ChaCha20Poly1305<S> {
         }
 
         res.unit_err(tag)
+    }
+
+    // what is this C#? These names may change, a bit verbose.
+
+    // similar interface to the ring crates update in place functions
+    pub fn update_in_place_streaming<'io>(&mut self, in_out: &'io mut [u8]) -> Result<&'io mut [u8], Unspecified> {
+        if !can_cast_u32(in_out.len()) { return Err(Unspecified) }
+        unsafe { self.update_in_place_unchecked(in_out) }.unit_err(in_out)
+    }
+
+    pub fn update_streaming(&mut self, input: &[u8], output: &mut [u8]) -> Result<(), Unspecified> {
+        if !Self::update_predicate(input, output) { return Err(Unspecified) }
+        unsafe { self.update_unchecked(input, output) }.unit_err(())
     }
 }
 

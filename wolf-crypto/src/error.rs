@@ -18,6 +18,13 @@ impl fmt::Display for Unspecified {
 }
 
 std! { impl std::error::Error for Unspecified {} }
+no_std_io! {
+    impl embedded_io::Error for Unspecified {
+        fn kind(&self) -> embedded_io::ErrorKind {
+            embedded_io::ErrorKind::Other
+        }
+    }
+}
 
 /// Trait for transforming a `Result<T, E>` into a `Result<T, Unspecified>`.
 ///
