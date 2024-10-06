@@ -781,28 +781,28 @@ mod property_tests {
 // working. I'll be tracking the issues regarding c ffi support and see what I can do to get
 // these working in the future. For now, property testing among unit tests are the direction
 // forward.
-#[cfg(kani)]
-mod proofs {
-    use kani::proof;
-    use super::*;
-    use crate::aes::test_utils::*;
-
-    #[proof]
-    fn self_bijectivity() {
-        let input: BoundList<1028> = kani::any();
-        let mut output = BoundList::<1028>::new_zeroes(input.len());
-
-        let key: Key = kani::any();
-        let nonce: Nonce = kani::any();
-
-        let mut aes = AesGcm::new(&key).unwrap();
-        let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
-
-        assert_ne!(input, output);
-
-        let mut plain = BoundList::<1028>::new_zeroes(input.len());
-        aes.decrypt(nonce.copy(), output.as_slice(), plain.as_mut_slice(), Aad::EMPTY, &tag);
-
-        assert_eq!(plain, input);
-    }
-}
+// #[cfg(kani)]
+// mod proofs {
+//     use kani::proof;
+//     use super::*;
+//     use crate::aes::test_utils::*;
+//
+//     #[proof]
+//     fn self_bijectivity() {
+//         let input: BoundList<1028> = kani::any();
+//         let mut output = BoundList::<1028>::new_zeroes(input.len());
+//
+//         let key: Key = kani::any();
+//         let nonce: Nonce = kani::any();
+//
+//         let mut aes = AesGcm::new(&key).unwrap();
+//         let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), Aad::EMPTY);
+//
+//         assert_ne!(input, output);
+//
+//         let mut plain = BoundList::<1028>::new_zeroes(input.len());
+//         aes.decrypt(nonce.copy(), output.as_slice(), plain.as_mut_slice(), Aad::EMPTY, &tag);
+//
+//         assert_eq!(plain, input);
+//     }
+// }

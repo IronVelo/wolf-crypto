@@ -223,31 +223,21 @@ std! {
     {
         #[inline]
         fn read(&mut self, buf: &mut [u8]) -> std_io::Result<usize> {
-            // We will do our safety checks in advance, it is quite probable that we have made
-            // all data updates infallible via our types + these preconditions. This read
-            // implementation existing necessitates further investigation.
-            //
-            // The danger is we read from the io type we're wrapping, and then we fail to
-            // encrypt, potentially leaking sensitive data. Again, revisiting the fallibility of
-            // the underlying chacha20poly1305 implementation is necessary with this implemented.
+            // We will do our safety checks in advance, we read from the io type we're wrapping,
+            // and then we fail encrypt, potentially leaking sensitive data. So, doing these
+            // checks in advance is necessary.
             if !can_cast_u32(buf.len()) { return Err(std_io::Error::other(Unspecified)) }
 
-            match self.io.read(buf) {
-                Ok(amount) => {
-                    into_result!(unsafe { self.aead.update_in_place_unchecked(&mut buf[..amount]) },
-                        ok => amount,
-                        // This is very bad
-                        err => std_io::Error::other(Unspecified)
-                    )
-                },
-                res @ Err(_) => res
-            }
+            self.io.read(buf).map(|amount| unsafe {
+                self.aead.update_in_place_unchecked(&mut buf[..amount]);
+                amount
+            })
         }
     }
 }
 
 no_std_io! {
-    impl<S: Updating, IO> ErrorType for Data<S, IO> {
+    impl<S: Updating, IO: ErrorType> ErrorType for Data<S, IO> {
         type Error = Unspecified;
     }
 
@@ -262,7 +252,8 @@ no_std_io! {
 
             match self.io.read(buf) {
                 Ok(amount) => {
-                    unsafe { self.aead.update_in_place_unchecked(&mut buf[..amount]) }.unit_err(amount)
+                    unsafe { self.aead.update_in_place_unchecked(&mut buf[..amount]) };
+                    Ok(amount)
                 },
                 Err(_) => Err(Unspecified)
             }

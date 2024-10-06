@@ -51,7 +51,6 @@ impl Res {
         self.0
     }
 
-
     /// Checks if the result is an error.
     ///
     /// # Returns

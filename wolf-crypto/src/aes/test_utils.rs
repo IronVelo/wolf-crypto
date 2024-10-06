@@ -364,7 +364,7 @@ impl kani::Arbitrary for Key {
         match kani::any::<u8>() % 3 {
             0 => Key::Aes256(kani::any()),
             1 => Key::Aes192(kani::any()),
-            _ => Key::Aes128(crate::aes::gcm::proofs::BoundList::any()),
+            _ => Key::Aes128(kani::any()),
         }
     }
 }
@@ -384,8 +384,8 @@ impl Arbitrary for Key {
 }
 
 #[cfg(kani)]
-impl kani::Arbitrary for Nonce {
+impl kani::Arbitrary for crate::buf::Nonce {
     fn any() -> Self {
-        Nonce::new(kani::any())
+        crate::buf::Nonce::new(kani::any())
     }
 }

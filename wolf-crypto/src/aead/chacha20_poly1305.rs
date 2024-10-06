@@ -38,13 +38,13 @@
 //! let tag = ChaCha20Poly1305::new_encrypt(Key::new([7u8; 32]), [7u8; 12])
 //!     .set_aad(aad).opaque()?
 //!     .update(plaintext, &mut ciphertext).opaque()?
-//!     .finalize().opaque()?;
+//!     .finalize();
 //!
 //! let d_tag = ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [7u8; 12])
 //!     .update_aad("Additional ")
 //!     .opaque_bind(|aead| aead.update_aad("data"))
 //!     .opaque_bind(|aead| aead.update_in_place(&mut ciphertext))
-//!     .opaque_bind(|aead| aead.finalize())?;
+//!     .opaque_map(|aead| aead.finalize())?;
 //!
 //! assert_eq!(tag, d_tag);
 //! assert_eq!(ciphertext, *plaintext);
@@ -435,13 +435,13 @@ where
 ///
 /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
 ///     .update_in_place(&mut in_out).opaque()?
-///     .finalize().opaque()?;
+///     .finalize();
 ///
 /// assert_ne!(in_out, [7u8; 42]);
 ///
 /// let d_tag = ChaCha20Poly1305::new_decrypt(key.as_ref(), [7u8; 12])
 ///     .update_in_place(&mut in_out).opaque()?
-///     .finalize().opaque()?;
+///     .finalize();
 ///
 /// // PartialEq for tags is constant time
 /// assert_eq!(tag, d_tag);
@@ -462,14 +462,14 @@ where
 /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
 ///     .set_aad("hello world").opaque()?
 ///     .update_in_place(&mut in_out).opaque()?
-///     .finalize().opaque()?;
+///     .finalize();
 ///
 /// assert_ne!(in_out, [7u8; 42]);
 ///
 /// let d_tag = ChaCha20Poly1305::new_decrypt(key.as_ref(), [7u8; 12])
 ///     .set_aad("hello world")
 ///     .opaque_bind(|aead| aead.update_in_place(&mut in_out))
-///     .opaque_bind(|aead| aead.finalize())?;
+///     .opaque_map(|aead| aead.finalize())?;
 ///
 /// // PartialEq for tags is constant time
 /// assert_eq!(tag, d_tag);
@@ -760,12 +760,12 @@ impl<S: CanUpdateAad> ChaCha20Poly1305<S> {
     ///     .update_aad("hello world").opaque()?
     ///     .update_aad("!").opaque()?
     ///     .finish()
-    ///     .finalize().opaque()?;
+    ///     .finalize();
     ///
     /// let d_tag = ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [42u8; 12])
     ///     .update_aad("hello world!").opaque()? // equivalent to processing in parts
     ///     .finish()
-    ///     .finalize().opaque()?;
+    ///     .finalize();
     ///
     /// assert_eq!(tag, d_tag);
     /// # Ok(()) }
@@ -787,10 +787,8 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     ///
     /// The caller must ensure that the length of `data` can be safely cast to `u32`.
     #[inline]
-    unsafe fn update_in_place_unchecked(&mut self, data: &mut [u8]) -> Res {
+    unsafe fn update_in_place_unchecked(&mut self, data: &mut [u8]) {
         debug_assert!(can_cast_u32(data.len()));
-
-        let mut res = Res::new();
 
         #[cfg(feature = "llvm-assume")]
             // Guaranteed via trait based state machine
@@ -807,13 +805,22 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
         //
         // The functions preconditions are as follows:
         //
-        // - aead != NULL /\ inData != NULL /\ outData == NULL
+        // - aead != NULL /\ inData != NULL /\ outData != NULL
         // - state == CHACHA20_POLY1305_STATE_READY
         //   /\ state == CHACHA20_POLY1305_STATE_AAD
         //   /\ state == CHACHA20_POLY1305_STATE_DATA
         //
+        // Which we satisfy via the type system.
+        //
+        // The internal function calls we have also already shown to be infallible. These being:
+        //
+        // - wc_Poly1305_Pad (see this crates poly1305 implementations infallibility commentary)
+        // - wc_Poly1305_Update (see this crates poly1305 implementations infallibility commentary)
+        // - wc_ChaCha_Process (see this crates chacha implementation's process_unchecked commentary)
+        //
+        // Which means both update_in_place_unchecked and update_unchecked are infallible.
 
-        res.ensure_0(wc_ChaCha20Poly1305_UpdateData(
+        let _res = wc_ChaCha20Poly1305_UpdateData(
             addr_of_mut!(self.inner),
             // See comment at:
             // https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/chacha20_poly1305.c#L246
@@ -821,9 +828,9 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
             data.as_ptr(),
             data.as_ptr().cast_mut(),
             data.len() as u32
-        ));
+        );
 
-        res
+        debug_assert_eq!(_res, 0);
     }
 
     /// Performs an unchecked update of the `data`, writing the `output` to a separate buffer.
@@ -834,11 +841,9 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     /// - `data.len() <= output.len()`
     /// - The length of `data` can be safely cast to `u32`.
     #[inline]
-    unsafe fn update_unchecked(&mut self, data: &[u8], output: &mut [u8]) -> Res {
+    unsafe fn update_unchecked(&mut self, data: &[u8], output: &mut [u8]) {
         debug_assert!(data.len() <= output.len());
         debug_assert!(can_cast_u32(data.len()));
-
-        let mut res = Res::new();
 
         #[cfg(feature = "llvm-assume")] {
             // Guaranteed via trait based state machine
@@ -849,14 +854,16 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
             );
         }
 
-        res.ensure_0(wc_ChaCha20Poly1305_UpdateData(
+        // See the update_in_place_unchecked commentary regarding the infallibility of this.
+
+        let _res = wc_ChaCha20Poly1305_UpdateData(
             addr_of_mut!(self.inner),
             data.as_ptr(),
             output.as_mut_ptr(),
             data.len() as u32
-        ));
+        );
 
-        res
+        debug_assert_eq!(_res, 0);
     }
 
     /// Predicate to check if the update operation can proceed.
@@ -895,26 +902,27 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
     ///     .set_aad("hello world").opaque()?
     ///     .update_in_place(&mut in_out).opaque()?
-    ///     .finalize().opaque()?;
+    ///     .finalize();
     ///
     /// assert_ne!(in_out, [7u8; 42]);
     ///
     /// let d_tag = ChaCha20Poly1305::new_decrypt(key.as_ref(), [7u8; 12])
     ///     .set_aad("hello world")
     ///     .opaque_bind(|aead| aead.update_in_place(&mut in_out))
-    ///     .opaque_bind(|aead| aead.finalize())?;
+    ///     .opaque_map(|aead| aead.finalize())?;
     ///
     /// assert_eq!(tag, d_tag);
     /// assert_eq!(in_out, [7u8; 42]);
     /// # Ok(()) }
     /// ```
+    #[inline]
     pub fn update_in_place(mut self, data: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
-        if !can_cast_u32(data.len()) { return Err(self) }
-
-        into_result! (unsafe { self.update_in_place_unchecked(data) },
-            ok => self.with_state(),
-            err => self
-        )
+        if can_cast_u32(data.len()) {
+            unsafe { self.update_in_place_unchecked(data) };
+            Ok(self.with_state())
+        } else {
+            Err(self)
+        }
     }
 
     /// Updates the internal state with the given data, encrypting or decrypting it in place.
@@ -951,19 +959,19 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     ///
     /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
     ///     .update_in_place_sized(&mut data).unwrap()
-    ///     .finalize().unwrap();
+    ///     .finalize();
     /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed());
     /// ```
     ///
     /// [`update_in_place`]: Self::update_in_place
     #[inline]
     pub fn update_in_place_sized<const C: usize>(mut self, data: &mut [u8; C]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
-        if !const_can_cast_u32::<C>() { return Err(self) }
-
-        into_result! (unsafe { self.update_in_place_unchecked(data) },
-            ok => self.with_state(),
-            err => self
-        )
+        if const_can_cast_u32::<C>() {
+            unsafe { self.update_in_place_unchecked(data) };
+            Ok(self.with_state())
+        } else {
+            Err(self)
+        }
     }
 
     /// Updates the internal state with the given data, encrypting or decrypting it into a separate
@@ -997,16 +1005,16 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     ///
     /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
     ///     .update_in_place_sized(&mut data).unwrap()
-    ///     .finalize().unwrap();
+    ///     .finalize();
     /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed());
     /// ```
     pub fn update(mut self, data: &[u8], output: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
-        if !Self::update_predicate(data, output) { return Err(self) }
-
-        into_result!(unsafe { self.update_unchecked(data, output) },
-            ok => self.with_state(),
-            err => self
-        )
+        if Self::update_predicate(data, output) {
+            unsafe { self.update_unchecked(data, output) };
+            Ok(self.with_state())
+        } else {
+            Err(self)
+        }
     }
 }
 
@@ -1046,10 +1054,12 @@ impl<S: CanSetAad> ChaCha20Poly1305<S> {
         aad: A
     ) -> Result<ChaCha20Poly1305<<S as CanSetAad>::Mode>, Self>
     {
-        if !aad.is_valid_size() { return Err(self) }
-
-        unsafe { self.update_aad_unchecked(aad); }
-        Ok(self.with_state())
+        if aad.is_valid_size() {
+            unsafe { self.update_aad_unchecked(aad); }
+            Ok(self.with_state())
+        } else {
+            Err(self)
+        }
     }
 }
 
@@ -1074,7 +1084,7 @@ impl<S: UpdatingAad> ChaCha20Poly1305<S> {
     ///     .opaque_bind(|aead| aead.update_aad("..."))
     ///     .opaque_map(|aead| aead.finish())
     ///      // (just use Poly1305 directly if you're doing this)
-    ///     .opaque_bind(|aead| aead.finalize()).unwrap();
+    ///     .opaque_map(|aead| aead.finalize()).unwrap();
     /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed()); // no warnings
     /// ```
     ///
@@ -1105,7 +1115,7 @@ impl<S: UpdatingAad> ChaCha20Poly1305<S> {
     /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
     /// let tag = ChaCha20Poly1305::new_encrypt(Key::new([7u8; 32]), [42u8; 12])
     ///     .set_aad("hello world! Beautiful weather.")
-    ///     .opaque_bind(|aead| aead.finalize())?;
+    ///     .opaque_map(|aead| aead.finalize())?;
     ///
     /// let mut d_cipher = ChaCha20Poly1305::new_decrypt(Key::new([7u8; 32]), [42u8; 12])
     ///     .update_aad("hello world").opaque()?;
@@ -1114,15 +1124,18 @@ impl<S: UpdatingAad> ChaCha20Poly1305<S> {
     /// d_cipher.update_aad_streaming("! ")?;
     /// d_cipher.update_aad_streaming("Beautiful weather.")?;
     ///
-    /// let d_tag = d_cipher.finish().finalize().opaque()?;
+    /// let d_tag = d_cipher.finish().finalize();
     ///
     /// assert_eq!(tag, d_tag);
     /// # Ok(()) }
     /// ```
     pub fn update_aad_streaming<A: Aad>(&mut self, aad: A) -> Result<(), Unspecified> {
-        if !aad.is_valid_size() { return Err(Unspecified) }
-        unsafe { self.update_aad_unchecked(aad); }
-        Ok(())
+        if aad.is_valid_size() {
+            unsafe { self.update_aad_unchecked(aad); }
+            Ok(())
+        } else {
+            Err(Unspecified)
+        }
     }
 }
 
@@ -1156,7 +1169,7 @@ impl<S: Updating> ChaCha20Poly1305<S> {
     /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), iv)
     ///     .set_aad("additional data").unwrap()
     ///     .update_in_place(&mut data).unwrap()
-    ///     .finalize().unwrap();
+    ///     .finalize();
     ///
     /// // be sure to keep the tag around! important!
     ///
@@ -1166,38 +1179,59 @@ impl<S: Updating> ChaCha20Poly1305<S> {
     /// let d_tag = ChaCha20Poly1305::new_decrypt(key, iv)
     ///     .set_aad("additional data").unwrap()
     ///     .update_in_place(&mut data).unwrap()
-    ///     .finalize().unwrap();
+    ///     .finalize();
     ///
     /// assert_eq!(data, [0u8; 64]);
     ///
     /// // most importantly!
     /// assert_eq!(tag, d_tag);
     /// ```
-    pub fn finalize(mut self) -> Result<Tag, Unspecified> {
+    #[inline]
+    pub fn finalize(mut self) -> Tag {
         let mut tag = Tag::new_zeroed();
-        let mut res = Res::new();
+
+        // INFALLIBLE
+        //
+        // The only way this function can fail is via the preconditions or an internal function
+        // failing. All internal functions are infallible, as described in this crate's poly1305
+        // commentary.
+        //
+        // The preconditions are as follows:
+        //
+        // - state == CHACHA20_POLY1305_STATE_AAD \/ state == CHACHA20_POLY1305_STATE_DATA
+        // - aead != null /\ outAuthTag != null
+        //
+        // The inherited preconditions from the internal function calls are respected in the same
+        // way that we respect them in the Poly1305 module, using the same types, et cetera.
 
         unsafe {
-            res.ensure_0(wc_ChaCha20Poly1305_Final(
+            let _res = wc_ChaCha20Poly1305_Final(
                 addr_of_mut!(self.inner),
                 tag.as_mut_ptr()
-            ));
+            );
+
+            debug_assert_eq!(_res, 0);
         }
 
-        res.unit_err(tag)
+        tag
     }
 
-    // what is this C#? These names may change, a bit verbose.
-
-    // similar interface to the ring crates update in place functions
     pub fn update_in_place_streaming<'io>(&mut self, in_out: &'io mut [u8]) -> Result<&'io mut [u8], Unspecified> {
-        if !can_cast_u32(in_out.len()) { return Err(Unspecified) }
-        unsafe { self.update_in_place_unchecked(in_out) }.unit_err(in_out)
+        if can_cast_u32(in_out.len()) {
+            unsafe { self.update_in_place_unchecked(in_out) };
+            Ok(in_out)
+        } else {
+            Err(Unspecified)
+        }
     }
 
     pub fn update_streaming(&mut self, input: &[u8], output: &mut [u8]) -> Result<(), Unspecified> {
-        if !Self::update_predicate(input, output) { return Err(Unspecified) }
-        unsafe { self.update_unchecked(input, output) }.unit_err(())
+        if Self::update_predicate(input, output) {
+            unsafe { self.update_unchecked(input, output) };
+            Ok(())
+        } else {
+            Err(Unspecified)
+        }
     }
 }
 
@@ -1218,12 +1252,12 @@ mod tests {
         let tag = ChaCha20Poly1305::new::<Encrypt>(key.as_ref(), [0u8; 12])
             .set_aad(Some(Some(Some(())))).unwrap()
             .update_in_place(cipher.as_mut_slice()).unwrap()
-            .finalize().unwrap();
+            .finalize();
 
         let new_tag = ChaCha20Poly1305::new::<Decrypt>(key.as_ref(), [0u8; 12])
             .set_aad(()).unwrap()
             .update_in_place(cipher.as_mut_slice()).unwrap()
-            .finalize().unwrap();
+            .finalize();
 
         assert_eq!(tag, new_tag);
         assert_eq!(cipher, [69, 69, 69, 69]);
@@ -1281,7 +1315,7 @@ mod property_tests {
             let mut output = input.create_self();
             let tag = ChaCha20Poly1305::new::<Encrypt>(key.as_ref(), iv.copy())
                 .update(input.as_slice(), output.as_mut_slice()).unwrap()
-                .finalize().unwrap();
+                .finalize();
 
             if output.len() >= 6 {
                 prop_assert_ne!(output.as_slice(), input.as_slice());
@@ -1290,7 +1324,7 @@ mod property_tests {
             let mut decrypted = output.create_self();
             let d_tag = ChaCha20Poly1305::new::<Decrypt>(key.as_ref(), iv)
                 .update(output.as_slice(), decrypted.as_mut_slice()).unwrap()
-                .finalize().unwrap();
+                .finalize();
 
             prop_assert_eq!(tag, d_tag);
             prop_assert_eq!(decrypted.as_slice(), input.as_slice());
@@ -1307,7 +1341,7 @@ mod property_tests {
             let tag = ChaCha20Poly1305::new::<Encrypt>(key.as_ref(), iv.copy())
                 .set_aad(aad.as_ref()).unwrap()
                 .update(input.as_slice(), output.as_mut_slice()).unwrap()
-                .finalize().unwrap();
+                .finalize();
 
             if output.len() >= 6 {
                 prop_assert_ne!(output.as_slice(), input.as_slice());
@@ -1317,7 +1351,7 @@ mod property_tests {
             let d_tag = ChaCha20Poly1305::new::<Decrypt>(key.as_ref(), iv)
                 .set_aad(aad.as_ref()).unwrap()
                 .update(output.as_slice(), decrypted.as_mut_slice()).unwrap()
-                .finalize().unwrap();
+                .finalize();
 
             prop_assert_eq!(tag, d_tag);
             prop_assert_eq!(decrypted.as_slice(), input.as_slice());
