@@ -1,3 +1,5 @@
+//! Authenticated Encryption with Associated Data
+
 mod aad;
 mod tag;
 mod aes_gcm;

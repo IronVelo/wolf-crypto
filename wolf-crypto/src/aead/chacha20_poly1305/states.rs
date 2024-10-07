@@ -52,7 +52,7 @@ define_state! {
 /// Indicates that the cipher can perform data updates in the current state.
 pub trait CanUpdate: State {
     /// The mode (encryption or decryption) associated with this state.
-    type Mode: CanUpdate;
+    type Mode: Updating;
 }
 
 /// Implemented by the two modes who can finalize the AEAD, as well as initialize it.
@@ -70,11 +70,11 @@ pub trait CanUpdateAad: State {
     type Updating: UpdatingAad;
 }
 pub trait CanSetAad: CanUpdateAad + CanUpdate {
-    type Mode: CanUpdate;
+    type Mode: Updating;
     type Updating: UpdatingAad;
 }
 pub trait UpdatingAad: CanUpdateAad {
-    type Mode: CanUpdate;
+    type Mode: Updating;
 }
 
 // AAD permitted states

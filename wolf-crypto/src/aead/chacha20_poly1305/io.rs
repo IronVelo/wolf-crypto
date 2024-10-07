@@ -3,6 +3,35 @@ use crate::aead::Aad as _;
 use crate::aead::chacha20_poly1305::states::Updating;
 use crate::{can_cast_u32, Unspecified};
 
+/// Combines a `ChaCha20Poly1305` instance in its AAD updating state with an IO type,
+/// allowing for streaming AAD processing through standard Read and Write traits.
+///
+/// # Example
+///
+/// ```
+/// # use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+/// # use wolf_crypto::MakeOpaque;
+#[cfg_attr(all(feature = "embedded-io", not(feature = "std")), doc = "# use embedded_io::Write;")]
+#[cfg_attr(feature = "std", doc = "# use std::io::Write;")]
+#[cfg_attr(
+    all(feature = "embedded-io", not(feature = "std")),
+    doc = "# fn main() -> Result<(), wolf_crypto::Unspecified> {"
+)]
+#[cfg_attr(feature = "std", doc = "# fn main() -> Result<(), Box<dyn std::error::Error>> {")]
+/// # let key = Key::new([0u8; 32]);
+/// # let iv = [0u8; 12];
+/// # let mut aad_buffer = [0u8; 64];
+/// #
+/// let mut aad_io = ChaCha20Poly1305::new_encrypt(key, iv)
+///     .aad_io(&mut aad_buffer[..]);
+///
+/// aad_io.write(b"Additional Authenticated Data")?;
+/// let (aead, _) = aad_io.finish();
+///
+/// // Continue with encryption...
+/// # Ok(())
+/// # }
+/// ```
 #[must_use]
 pub struct Aad<S: UpdatingAad, IO> {
     aad: ChaCha20Poly1305<S>,
@@ -10,6 +39,12 @@ pub struct Aad<S: UpdatingAad, IO> {
 }
 
 impl<S: UpdatingAad, IO> Aad<S, IO> {
+    /// Creates a new `Aad` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `aad`: A ChaCha20Poly1305 instance in its AAD updating state.
+    /// * `io`: The underlying IO type for reading or writing AAD.
     pub const fn new(aad: ChaCha20Poly1305<S>, io: IO) -> Self {
         Self { aad, io }
     }
@@ -25,9 +60,9 @@ impl<S: UpdatingAad, IO> Aad<S, IO> {
     /// ```
     /// use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
     /// use wolf_crypto::MakeOpaque;
+    ///
     #[cfg_attr(all(feature = "embedded-io", not(feature = "std")), doc = "use embedded_io::Write;")]
     #[cfg_attr(feature = "std", doc = "use std::io::Write;")]
-    ///
     #[cfg_attr(
         all(feature = "embedded-io", not(feature = "std")),
         doc = "# fn main() -> Result<(), wolf_crypto::Unspecified> {"
@@ -45,7 +80,7 @@ impl<S: UpdatingAad, IO> Aad<S, IO> {
     ///
     /// assert_eq!(&some_io_write_implementor[..read], b"hello world");
     ///
-    /// let tag = aead.finalize()?;
+    /// let tag = aead.finalize();
     /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed()); // no warnings
     /// # Ok(()) }
     /// ```
@@ -198,6 +233,39 @@ no_std_io! {
     }
 }
 
+/// Combines a `ChaCha20Poly1305` instance in its data updating state with an IO type,
+/// allowing for streaming encryption or decryption through the standard Read trait.
+///
+/// # Example
+///
+/// ```
+/// # use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+/// # use wolf_crypto::MakeOpaque;
+#[cfg_attr(all(feature = "embedded-io", not(feature = "std")), doc = "# use embedded_io::Read;")]
+#[cfg_attr(feature = "std", doc = "# use std::io::Read;")]
+#[cfg_attr(
+    all(feature = "embedded-io", not(feature = "std")),
+    doc = "# fn main() -> Result<(), wolf_crypto::Unspecified> {"
+)]
+#[cfg_attr(feature = "std", doc = "# fn main() -> Result<(), Box<dyn std::error::Error>> {")]
+/// # let key = Key::new([0u8; 32]);
+/// # let iv = [0u8; 12];
+/// # let plaintext = b"Secret message";
+/// # let mut ciphertext = [0u8; 64];
+/// #
+/// let mut io = ChaCha20Poly1305::new_encrypt(key, iv)
+///     .data_io(plaintext.as_slice());
+///
+/// let bytes_read = io.read(&mut ciphertext)?;
+/// let (aead, _) = io.finish();
+///
+/// assert_ne!(plaintext.as_slice(), &ciphertext[..bytes_read]);
+/// assert_eq!(bytes_read, plaintext.len());
+///
+/// let tag = aead.finalize();
+/// # Ok(())
+/// # }
+/// ```
 #[must_use]
 pub struct Data<S: Updating, IO> {
     aead: ChaCha20Poly1305<S>,
@@ -205,10 +273,50 @@ pub struct Data<S: Updating, IO> {
 }
 
 impl<S: Updating, IO> Data<S, IO> {
+    /// Creates a new `Data` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `aead`: A ChaCha20Poly1305 instance in its data updating state.
+    /// * `io`: The underlying IO type for reading data to be encrypted or decrypted.
     pub const fn new(aead: ChaCha20Poly1305<S>, io: IO) -> Self {
         Self { aead, io }
     }
 
+    /// Finalizes the data processing and returns the updated `ChaCha20Poly1305` instance.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - The updated ChaCha20Poly1305 instance, ready for finalization.
+    /// - The underlying IO type.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+    /// # use wolf_crypto::MakeOpaque;
+    #[cfg_attr(all(feature = "embedded-io", not(feature = "std")), doc = "# use embedded_io::Read;")]
+    #[cfg_attr(feature = "std", doc = "# use std::io::Read;")]
+    #[cfg_attr(
+        all(feature = "embedded-io", not(feature = "std")),
+        doc = "# fn main() -> Result<(), wolf_crypto::Unspecified> {"
+    )]
+    #[cfg_attr(feature = "std", doc = "# fn main() -> Result<(), Box<dyn std::error::Error>> {")]
+    /// # let key = Key::new([0u8; 32]);
+    /// # let iv = [0u8; 12];
+    /// # let plaintext = b"Secret message";
+    /// # let mut ciphertext = [0u8; 64];
+    /// let mut data_io = ChaCha20Poly1305::new_encrypt(key, iv)
+    ///     .data_io(plaintext.as_slice());
+    ///
+    /// data_io.read(&mut ciphertext)?;
+    /// let (aead, _) = data_io.finish();
+    ///
+    /// let tag = aead.finalize();
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn finish(self) -> (ChaCha20Poly1305<S>, IO) {
         (self.aead, self.io)

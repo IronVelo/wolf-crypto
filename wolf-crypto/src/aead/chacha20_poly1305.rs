@@ -8,7 +8,7 @@
 //!
 //! Using the one-shot encryption function:
 //!
-//! ```rust
+//! ```
 //! use wolf_crypto::aead::chacha20_poly1305::{encrypt, decrypt_in_place, Key};
 //!
 //! # fn main() -> Result<(), wolf_crypto::Unspecified> {
@@ -26,7 +26,7 @@
 //!
 //! Using the stateful API:
 //!
-//! ```rust
+//! ```
 //! use wolf_crypto::{aead::ChaCha20Poly1305, MakeOpaque};
 //! use wolf_crypto::mac::poly1305::Key;
 //!
@@ -59,6 +59,9 @@ io_impls! {
 
     #[doc(inline)]
     pub use io::Aad as IoAad;
+
+    #[doc(inline)]
+    pub use io::Data as IoData;
 }
 
 use wolf_crypto_sys::{
@@ -731,6 +734,50 @@ impl<S: CanUpdateAad> ChaCha20Poly1305<S> {
     }
 
     io_impls! {
+        /// Returns an `Aad<S::Updating, IO>` struct which implements the `Read` and `Write` traits
+        /// for processing Additional Authenticated Data (AAD).
+        ///
+        /// This method allows for streaming AAD processing, which is useful when the entire AAD
+        /// is not available at once or when working with I/O streams.
+        ///
+        /// # Arguments
+        ///
+        /// * `io`: An implementor of the `Read` or `Write` traits. The data passed to and from
+        ///   this `io` implementor will be authenticated as AAD.
+        ///
+        /// # Returns
+        ///
+        /// An `Aad<S::Updating, IO>` struct that wraps the ChaCha20Poly1305 instance and the
+        /// provided IO type.
+        ///
+        /// # Example
+        ///
+        /// ```
+        /// use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+        /// use wolf_crypto::MakeOpaque;
+        #[cfg_attr(all(feature = "embedded-io", not(feature = "std")), doc = "use embedded_io::Write;")]
+        #[cfg_attr(feature = "std", doc = "use std::io::Write;")]
+        ///
+        #[cfg_attr(
+            all(feature = "embedded-io", not(feature = "std")),
+            doc = "# fn main() -> Result<(), wolf_crypto::Unspecified> {"
+        )]
+        #[cfg_attr(feature = "std", doc = "# fn main() -> Result<(), Box<dyn std::error::Error>> {")]
+        /// let (key, iv) = (Key::new([7u8; 32]), [42; 12]);
+        /// let mut some_io_write_implementor = [7u8; 64];
+        ///
+        /// let mut io = ChaCha20Poly1305::new_encrypt(key, iv)
+        ///     .aad_io(some_io_write_implementor.as_mut_slice());
+        ///
+        /// let read = io.write(b"hello world")?;
+        /// let (aead, _my_writer) = io.finish();
+        ///
+        /// assert_eq!(&some_io_write_implementor[..read], b"hello world");
+        ///
+        /// let tag = aead.finalize();
+        /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed()); // no warnings
+        /// # Ok(()) }
+        /// ```
         #[inline]
         pub const fn aad_io<IO>(self, io: IO) -> IoAad<S::Updating, IO> {
             io::Aad::new(self.with_state(), io)
@@ -876,19 +923,15 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
         can_cast_u32(input.len()) && output.len() >= input.len()
     }
 
-    /// Updates the internal state with the given data, encrypting or decrypting it in place.
-    ///
-    /// This method processes the provided `data` buffer, updating the internal cipher state, and
-    /// encrypting or decrypting the data in place, depending on whether the instance was created
-    /// in encryption or decryption mode.
+    /// Encrypt / Decrypt the provided `in_out` data in-place.
     ///
     /// # Arguments
     ///
-    /// * `data` - A mutable slice of data to be encrypted or decrypted in place.
+    /// * `in_out` - A mutable slice of data to be encrypted / decrypted in place.
     ///
     /// # Errors
     ///
-    /// If the length of `data` is greater than `u32::MAX`.
+    /// If the length of `in_out` is greater than `u32::MAX`.
     ///
     /// # Example
     ///
@@ -916,70 +959,65 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     /// # Ok(()) }
     /// ```
     #[inline]
-    pub fn update_in_place(mut self, data: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
-        if can_cast_u32(data.len()) {
-            unsafe { self.update_in_place_unchecked(data) };
+    pub fn update_in_place(mut self, in_out: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
+        if can_cast_u32(in_out.len()) {
+            unsafe { self.update_in_place_unchecked(in_out) };
             Ok(self.with_state())
         } else {
             Err(self)
         }
     }
 
-    /// Updates the internal state with the given data, encrypting or decrypting it in place.
-    ///
-    /// This method processes the provided fixed-size `data` buffer, updating the internal cipher
-    /// state, and encrypting or decrypting the data in place, depending on whether the instance was
-    /// created in encryption or decryption mode.
+    /// Encrypt / Decrypt the provided `in_out` data in-place.
     ///
     /// This method is similar to [`update_in_place`], but accepts a fixed-size array, allowing for
     /// potential optimizations and compile-time checks.
     ///
-    /// # Type Parameters
-    ///
-    /// * `C` - The size of the data buffer.
-    ///
     /// # Arguments
     ///
-    /// * `data` - A mutable fixed-size array of data to be encrypted or decrypted in place.
+    /// * `in_out` - A mutable fixed-size array of data to be encrypted or decrypted in place.
     ///
     /// # Errors
     ///
-    /// If the length of `data` is greater than `u32::MAX`.
+    /// If the length of `in_out` is greater than `u32::MAX`.
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```
     /// use wolf_crypto::aead::{ChaCha20Poly1305};
     /// use wolf_crypto::mac::poly1305::Key;
     /// use wolf_crypto::MakeOpaque;
     ///
-    /// let mut data = [0u8; 64];
+    /// let mut data = [42u8; 64];
     /// let key = Key::new([0u8; 32]);
     /// let iv = [0u8; 12];
     ///
-    /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
+    /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), iv)
     ///     .update_in_place_sized(&mut data).unwrap()
     ///     .finalize();
-    /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed());
+    ///
+    /// assert_ne!(data, [42u8; 64]);
+    ///
+    /// let d_tag = ChaCha20Poly1305::new_decrypt(key, iv)
+    ///     .update_in_place_sized(&mut data).unwrap()
+    ///     .finalize();
+    ///
+    /// assert_eq!(data, [42u8; 64]);
+    /// assert_eq!(tag, d_tag);
     /// ```
     ///
     /// [`update_in_place`]: Self::update_in_place
     #[inline]
-    pub fn update_in_place_sized<const C: usize>(mut self, data: &mut [u8; C]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
+    pub fn update_in_place_sized<const C: usize>(mut self, in_out: &mut [u8; C]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
         if const_can_cast_u32::<C>() {
-            unsafe { self.update_in_place_unchecked(data) };
+            unsafe { self.update_in_place_unchecked(in_out) };
             Ok(self.with_state())
         } else {
             Err(self)
         }
     }
 
-    /// Updates the internal state with the given data, encrypting or decrypting it into a separate
-    /// output buffer.
-    ///
-    /// This method processes the provided `data` slice, updating the internal cipher state, and
-    /// writing the encrypted or decrypted data into the provided `output` buffer, depending on
-    /// whether the instance was created in encryption or decryption mode.
+    /// Encrypt / Decrypt the provided `data` into the `output` buffer.
     ///
     /// # Arguments
     ///
@@ -994,19 +1032,28 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```
     /// use wolf_crypto::aead::{ChaCha20Poly1305};
     /// use wolf_crypto::mac::poly1305::Key;
     /// use wolf_crypto::MakeOpaque;
     ///
-    /// let mut data = [0u8; 64];
+    /// let data = [42u8; 64];
+    /// let mut out = [0u8; 64];
     /// let key = Key::new([0u8; 32]);
     /// let iv = [0u8; 12];
     ///
-    /// let tag = ChaCha20Poly1305::new_encrypt(key, iv)
-    ///     .update_in_place_sized(&mut data).unwrap()
+    /// let tag = ChaCha20Poly1305::new_encrypt(key.as_ref(), iv)
+    ///     .update(&data, &mut out).unwrap()
     ///     .finalize();
-    /// # assert_ne!(tag, wolf_crypto::aead::Tag::new_zeroed());
+    ///
+    /// assert_ne!(out, data);
+    ///
+    /// let d_tag = ChaCha20Poly1305::new_decrypt(key, iv)
+    ///     .update_in_place(&mut out).unwrap()
+    ///     .finalize();
+    ///
+    /// assert_eq!(out, data);
+    /// assert_eq!(tag, d_tag);
     /// ```
     pub fn update(mut self, data: &[u8], output: &mut [u8]) -> Result<ChaCha20Poly1305<S::Mode>, Self> {
         if Self::update_predicate(data, output) {
@@ -1014,6 +1061,64 @@ impl<S: CanUpdate> ChaCha20Poly1305<S> {
             Ok(self.with_state())
         } else {
             Err(self)
+        }
+    }
+
+    io_impls! {
+        /// Returns a `Data<S::Mode, IO>` struct which implements the `Read` trait for
+        /// encrypting / decrypting data.
+        ///
+        /// This method allows for streaming data processing, which is useful when working
+        /// with large amounts of data or I/O streams.
+        ///
+        /// # Arguments
+        ///
+        /// * `io`: An implementor of the `Read` trait. The data read from this `io` implementor
+        ///   will be encrypted or decrypted depending on the mode of the ChaCha20Poly1305 instance.
+        ///
+        /// # Returns
+        ///
+        /// A `Data<S::Mode, IO>` struct that wraps the ChaCha20Poly1305 instance and the
+        /// provided IO type.
+        ///
+        /// # Example
+        ///
+        /// ```
+        /// use wolf_crypto::aead::chacha20_poly1305::{ChaCha20Poly1305, Key};
+        /// use wolf_crypto::MakeOpaque;
+        #[cfg_attr(all(feature = "embedded-io", not(feature = "std")), doc = "use embedded_io::Read;")]
+        #[cfg_attr(feature = "std", doc = "use std::io::Read;")]
+        ///
+        #[cfg_attr(
+            all(feature = "embedded-io", not(feature = "std")),
+            doc = "# fn main() -> Result<(), wolf_crypto::Unspecified> {"
+        )]
+        #[cfg_attr(feature = "std", doc = "# fn main() -> Result<(), Box<dyn std::error::Error>> {")]
+        /// let (key, iv) = (Key::new([7u8; 32]), [42; 12]);
+        /// let plaintext = b"hello world";
+        ///
+        /// // Encrypt
+        /// let mut encrypted = [0u8; 32];
+        /// let mut encrypt_io = ChaCha20Poly1305::new_encrypt(key.as_ref(), iv)
+        ///     .data_io(&plaintext[..]);
+        /// let encrypted_len = encrypt_io.read(&mut encrypted)?;
+        /// let (aead, _) = encrypt_io.finish();
+        /// let tag = aead.finalize();
+        ///
+        /// // Decrypt
+        /// let mut decrypted = [0u8; 32];
+        /// let mut decrypt_io = ChaCha20Poly1305::new_decrypt(key, iv)
+        ///     .data_io(&encrypted[..encrypted_len]);
+        /// let decrypted_len = decrypt_io.read(&mut decrypted)?;
+        /// let (aead, _) = decrypt_io.finish();
+        /// let decrypted_tag = aead.finalize();
+        ///
+        /// assert_eq!(&decrypted[..decrypted_len], plaintext);
+        /// assert_eq!(tag, decrypted_tag);
+        /// # Ok(()) }
+        /// ```
+        pub const fn data_io<IO>(self, io: IO) -> IoData<S::Mode, IO> {
+            io::Data::new(self.with_state(), io)
         }
     }
 }
@@ -1216,6 +1321,43 @@ impl<S: Updating> ChaCha20Poly1305<S> {
         tag
     }
 
+    /// Encrypt / Decrypt the provided `in_out` data in-place without taking ownership of the AEAD
+    /// instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `in_out` - A mutable slice of data to be encrypted / decrypted in place.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the updated `in_out` slice on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Unspecified` if the length of `in_out` is greater than `u32::MAX`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use wolf_crypto::{aead::ChaCha20Poly1305, mac::poly1305::Key, MakeOpaque};
+    /// #
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// # let mut in_out1 = [7u8; 42];
+    /// # let mut in_out2 = [8u8; 42];
+    /// # let key = Key::new([3u8; 32]);
+    /// #
+    /// let mut aead = ChaCha20Poly1305::new_encrypt(key.as_ref(), [7u8; 12])
+    ///     .set_aad("hello world").opaque()?;
+    ///
+    /// aead.update_in_place_streaming(&mut in_out1)?;
+    /// aead.update_in_place_streaming(&mut in_out2)?;
+    ///
+    /// let tag = aead.finalize();
+    ///
+    /// assert_ne!(in_out1, [7u8; 42]);
+    /// assert_ne!(in_out2, [8u8; 42]);
+    /// # Ok(()) }
+    /// ```
     pub fn update_in_place_streaming<'io>(&mut self, in_out: &'io mut [u8]) -> Result<&'io mut [u8], Unspecified> {
         if can_cast_u32(in_out.len()) {
             unsafe { self.update_in_place_unchecked(in_out) };
@@ -1225,6 +1367,47 @@ impl<S: Updating> ChaCha20Poly1305<S> {
         }
     }
 
+    /// Encrypt / Decrypt the provided `input` data into the `output` buffer without taking
+    /// ownership of the AEAD instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - A slice of data to be encrypted / decrypted.
+    /// * `output` - A mutable slice where the result will be written. It must be at least as large
+    ///   as `input`.
+    ///
+    /// # Errors
+    ///
+    /// - The length of `input` is greater than `u32::MAX`.
+    /// - The `output` buffer is smaller than the `input` buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use wolf_crypto::aead::{ChaCha20Poly1305};
+    /// # use wolf_crypto::mac::poly1305::Key;
+    /// # use wolf_crypto::MakeOpaque;
+    /// #
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// # let data1 = [42u8; 32];
+    /// # let data2 = [43u8; 32];
+    /// # let mut out1 = [0u8; 32];
+    /// # let mut out2 = [0u8; 32];
+    /// # let key = Key::new([0u8; 32]);
+    /// # let iv = [0u8; 12];
+    /// #
+    /// let mut aead = ChaCha20Poly1305::new_encrypt(key.as_ref(), iv)
+    ///     .set_aad("additional data").opaque()?;
+    ///
+    /// aead.update_streaming(&data1, &mut out1)?;
+    /// aead.update_streaming(&data2, &mut out2)?;
+    ///
+    /// let tag = aead.finalize();
+    ///
+    /// assert_ne!(out1, data1);
+    /// assert_ne!(out2, data2);
+    /// # Ok(()) }
+    /// ```
     pub fn update_streaming(&mut self, input: &[u8], output: &mut [u8]) -> Result<(), Unspecified> {
         if Self::update_predicate(input, output) {
             unsafe { self.update_unchecked(input, output) };
