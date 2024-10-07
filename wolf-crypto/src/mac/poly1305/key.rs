@@ -21,7 +21,7 @@ use crate::sealed::Sealed;
 pub const KEY_SIZE: usize = KEY_SIZE_U32 as usize;
 
 /// The size of the Poly1305 key as a `u32`.
-pub(crate) const KEY_SIZE_U32: u32 = 32;
+pub const KEY_SIZE_U32: u32 = 32;
 
 
 /// A sealed trait for generic key types used in Poly1305.
@@ -89,7 +89,7 @@ impl Zeroize for Key {
     /// This method securely erases the key from memory to prevent leakage.
     #[inline]
     fn zeroize(&mut self) {
-        self.inner.zeroize()
+        self.inner.zeroize();
     }
 }
 
@@ -129,7 +129,7 @@ impl Drop for Key {
     /// Drops the `Key`, ensuring that the key material is zeroed from memory.
     #[inline]
     fn drop(&mut self) {
-        self.zeroize()
+        self.zeroize();
     }
 }
 

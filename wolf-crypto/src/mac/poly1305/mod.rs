@@ -7,12 +7,12 @@
 //! let key = Key::new([0u8; 32]);
 //!
 //! let tag = Poly1305::new(key.as_ref())
+//!     .aead_padding()
 //!     .update(b"hello world")?
 //!     .finalize();
 //!
 //! let o_tag = Poly1305::new(key)
-//!     .update(b"Different message")?
-//!     .finalize();
+//!     .mac(b"Different message", ()).unwrap();
 //!
 //! assert_eq!(
 //!     tag, o_tag,
@@ -22,6 +22,7 @@
 //! let key = Key::new([42u8; 32]);
 //!
 //! let tag = Poly1305::new(key.as_ref())
+//!     .aead_padding_ct()
 //!     .update_ct(b"thankfully this ")
 //!     .update_ct(b"is only the case ")
 //!     .update_ct(b"with a key of all zeroes.")
@@ -65,7 +66,6 @@
 //! [3]: https://cr.yp.to/snuffle.html
 //! [4]: https://cr.yp.to/chacha/chacha-20080128.pdf
 //! [`ChaCha20Poly1305`]: crate::aead::ChaCha20Poly1305
-
 
 use wolf_crypto_sys::{
     Poly1305 as wc_Poly1305,
@@ -207,6 +207,7 @@ use crate::ct;
 /// let key: Key = [7u8; 32].into();
 ///
 /// let tag = Poly1305::new(key.as_ref())
+///     .aead_padding_ct()
 ///     .update_ct(b"hello world")
 ///     .update_ct(b", how are you")
 ///     .finalize()
@@ -226,9 +227,8 @@ pub struct Poly1305<State: Poly1305State = Init> {
 
 impl<State: Poly1305State> From<Poly1305<State>> for Unspecified {
     #[inline]
-    fn from(value: Poly1305<State>) -> Self {
-        drop(value);
-        Unspecified
+    fn from(_value: Poly1305<State>) -> Self {
+        Self
     }
 }
 
@@ -346,7 +346,8 @@ impl Poly1305<Ready> {
         tag
     }
 
-    /// Computes the MAC for the given input and additional data.
+    /// Computes the MAC for the given input and additional data. This uses the TLS AEAD padding
+    /// scheme. If this is undesirable, consider calling `update` followed by `finalize` manually.
     ///
     /// # Arguments
     ///
@@ -382,6 +383,108 @@ impl Poly1305<Ready> {
         }
     }
 
+    /// Transitions the `Poly1305` instance into the streaming state with the TLS AEAD padding
+    /// scheme.
+    ///
+    /// # Returns
+    ///
+    /// A [`StreamPoly1305Aead`] instance for continued updates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let key: Key = [42u8; 32].into();
+    /// let stream = Poly1305::new(key.as_ref())
+    ///     .aead_padding()
+    ///     .update(b"chunk1")?
+    ///     .update(b"chunk2")?;
+    /// # Ok(()) }
+    /// ```
+    pub const fn aead_padding(self) -> StreamPoly1305Aead {
+        StreamPoly1305Aead::from_parts(self.with_state(), 0)
+    }
+
+    /// Transitions the `Poly1305` instance into the streaming state.
+    ///
+    /// # Returns
+    ///
+    /// A [`StreamPoly1305`] instance for continued updates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let key: Key = [42u8; 32].into();
+    /// let stream = Poly1305::new(key.as_ref()).normal()
+    ///     .update(b"chunk1")?
+    ///     .update(b"chunk2")?;
+    /// # Ok(()) }
+    /// ```
+    pub const fn normal(self) -> StreamPoly1305 {
+        StreamPoly1305::from_parts(self.with_state(), 0)
+    }
+
+    /// Transitions the `Poly1305` instance into the streaming state with the TLS AEAD padding
+    /// scheme.
+    ///
+    /// The distinction between this and the standard [`aead_padding`] is that this accumulates
+    /// errors up until the point of finalization in constant time.
+    ///
+    /// # Returns
+    ///
+    /// A [`CtPoly1305Aead`] instance for continued updates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let key: Key = [42u8; 32].into();
+    /// let stream = Poly1305::new(key.as_ref())
+    ///     .aead_padding_ct()
+    ///     .update_ct(b"chunk1")
+    ///     .update_ct(b"chunk2");
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`aead_padding`]: Self::aead_padding
+    pub const fn aead_padding_ct(self) -> CtPoly1305Aead {
+        CtPoly1305Aead::from_parts(self.with_state(), Res::OK, 0)
+    }
+
+    /// Transitions the `Poly1305` instance into the streaming state.
+    ///
+    /// The distinction between this and the standard [`normal`] is that this accumulates
+    /// errors up until the point of finalization in constant time.
+    ///
+    /// # Returns
+    ///
+    /// A [`CtPoly1305`] instance for continued updates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let key: Key = [42u8; 32].into();
+    /// let stream = Poly1305::new(key.as_ref()).normal_ct()
+    ///     .update_ct(b"chunk1")
+    ///     .update_ct(b"chunk2");
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`normal`]: Self::normal
+    pub const fn normal_ct(self) -> CtPoly1305 {
+        CtPoly1305::from_parts(self.with_state(), Res::OK, 0)
+    }
+
     /// Updates the `Poly1305` instance with additional input, transitioning it to a streaming
     /// state.
     ///
@@ -411,12 +514,13 @@ impl Poly1305<Ready> {
     /// ```
     #[inline]
     pub fn update(mut self, input: &[u8]) -> Result<StreamPoly1305, Unspecified> {
-        if let Some(input_len) = to_u32(input.len()) {
-            unsafe { self.update_unchecked(input) };
-            Ok(StreamPoly1305::from_parts(self.with_state(), input_len))
-        } else {
-            Err(Unspecified)
-        }
+        to_u32(input.len()).map_or(
+            Err(Unspecified), 
+            |len| unsafe {
+                self.update_unchecked(input);
+                Ok(StreamPoly1305::from_parts(self.with_state(), len))
+            }
+        )
     }
 
     /// Updates the `Poly1305` instance with additional input in a constant-time manner.
@@ -435,41 +539,41 @@ impl Poly1305<Ready> {
     /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
     ///
     /// let key: Key = [42u8; 32].into();
-    /// let ct_poly = Poly1305::new(key)
+    /// let tag = Poly1305::new(key.as_ref())
     ///     .update_ct(b"sensitive ")
     ///     .update_ct(b"chunks")
     ///     .finalize()
     ///     .unwrap();
     ///
-    /// dbg!(ct_poly);
-    /// assert_ne!(ct_poly, Tag::new_zeroed());
+    /// let o_tag = Poly1305::new(key.as_ref())
+    ///     .update_ct(b"sensitive chunks")
+    ///     .finalize().unwrap();
+    ///
+    /// assert_eq!(tag, o_tag);
     /// ```
     pub fn update_ct(mut self, input: &[u8]) -> CtPoly1305 {
-        let (adjusted, res) = CtPoly1305::adjust_slice(input);
+        let (adjusted, res) = adjust_slice(input);
         unsafe { self.update_unchecked(adjusted) };
+        // adjusted length will always be below u32::MAX
         CtPoly1305::from_parts(self.with_state(), res, adjusted.len() as u32)
     }
 }
 
-/// Finalizes the `Poly1305` MAC computation.
+/// Finalizes the `Poly1305` MAC computation using the TLS AEAD padding scheme.
 ///
 /// # Arguments
 ///
-/// * `res` - The current `Res` state.
 /// * `poly` - The `Poly1305` instance.
 /// * `accum_len` - The accumulated length of the input data.
 ///
 /// # Returns
 ///
-/// A `Result<Tag, Unspecified>` containing the computed `Tag` on success or an `Unspecified` error
-/// on failure.
+/// The associated authentication [`Tag`].
 #[inline]
-fn finalize<S: Poly1305State>(mut poly: Poly1305<S>, accum_len: u32) -> Tag {
+fn finalize_aead<S: Poly1305State>(mut poly: Poly1305<S>, accum_len: u32) -> Tag {
     // Regarding fallibility for all functions invoked, and debug_asserted to have succeeded,
     // see the commentary at the beginning of the document.
     unsafe {
-        let mut tag = Tag::new_zeroed();
-
         let _res = wc_Poly1305_Pad(
             addr_of_mut!(poly.inner),
             accum_len
@@ -485,6 +589,48 @@ fn finalize<S: Poly1305State>(mut poly: Poly1305<S>, accum_len: u32) -> Tag {
 
         debug_assert_eq!(_res, 0);
 
+        finalize_no_pad(poly)
+    }
+}
+
+/// Finalizes the `Poly1305` MAC computation with padding.
+///
+/// # Arguments
+///
+/// * `poly` - The `Poly1305` instance.
+/// * `to_pad` - Either the length of the input, or the accumulated output of [`update_to_pad`].
+///
+/// # Returns
+///
+/// The associated authentication [`Tag`].
+#[inline]
+fn finalize<S: Poly1305State>(mut poly: Poly1305<S>, to_pad: u32) -> Tag {
+    unsafe {
+        let _res = wc_Poly1305_Pad(
+            addr_of_mut!(poly.inner),
+            to_pad
+        );
+
+        debug_assert_eq!(_res, 0);
+
+        finalize_no_pad(poly)
+    }
+}
+
+/// Finalizes the `Poly1305` MAC computation without padding.
+///
+/// # Arguments
+///
+/// * `poly` - The `Poly1305` instance.
+///
+/// # Returns
+///
+/// The associated authentication [`Tag`].
+#[inline]
+fn finalize_no_pad<S: Poly1305State>(mut poly: Poly1305<S>) -> Tag {
+    unsafe {
+        let mut tag = Tag::new_zeroed();
+
         let _res = wc_Poly1305Final(
             addr_of_mut!(poly.inner),
             tag.as_mut_ptr()
@@ -496,7 +642,20 @@ fn finalize<S: Poly1305State>(mut poly: Poly1305<S>, accum_len: u32) -> Tag {
     }
 }
 
+#[inline(always)]
+#[must_use]
+const fn update_to_pad(to_pad: u8, new_len: u32) -> u8 {
+    // this is the same as (num + num) & 15, where num is a number of any possible size, not bound
+    // to a concrete type like u32.
+
+    // With wolfcrypt's padding algorithm this will always result in the same output as providing
+    // the total length. See kani verification at the bottom of the file.
+    to_pad.wrapping_add((new_len & 15) as u8) & 15
+}
+
 /// Represents an ongoing streaming MAC computation, allowing incremental updates.
+///
+/// This uses the TLS AEAD padding scheme.
 ///
 /// # Example
 ///
@@ -506,27 +665,28 @@ fn finalize<S: Poly1305State>(mut poly: Poly1305<S>, accum_len: u32) -> Tag {
 /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
 /// let key: Key = [42u8; 32].into();
 /// let tag = Poly1305::new(key.as_ref())
+///     .aead_padding()
 ///     .update(b"chunk1")?
 ///     .update(b"chunk2")?
 ///     .update(b"chunk3")?
 ///     .finalize();
 /// # Ok(()) }
 /// ```
-pub struct StreamPoly1305 {
+pub struct StreamPoly1305Aead {
     poly1305: Poly1305<Streaming>,
     accum_len: u32
 }
 
-impl From<StreamPoly1305> for Unspecified {
+impl From<StreamPoly1305Aead> for Unspecified {
     #[inline]
-    fn from(value: StreamPoly1305) -> Self {
+    fn from(value: StreamPoly1305Aead) -> Self {
         value.poly1305.into()
     }
 }
 
-opaque_dbg! { StreamPoly1305 }
+opaque_dbg! { StreamPoly1305Aead }
 
-impl StreamPoly1305 {
+impl StreamPoly1305Aead {
     /// Creates a new `StreamPoly1305` instance from its parts.
     ///
     /// # Arguments
@@ -577,6 +737,7 @@ impl StreamPoly1305 {
     /// let key: Key = [42u8; 32].into();
     ///
     /// let tag = Poly1305::new(key.as_ref())
+    ///     .aead_padding()
     ///     .update(b"chunk1")?
     ///     .update(b"chunk2")?
     ///     .update(b"chunk3")?
@@ -606,7 +767,83 @@ impl StreamPoly1305 {
     ///
     /// # Returns
     ///
-    /// A `Result<Tag, Unspecified>` containing the computed `Tag` on success or an `Unspecified` error on failure.
+    /// The associated authentication [`Tag`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let key: Key = [42u8; 32].into();
+    ///
+    /// let tag = Poly1305::new(key.as_ref())
+    ///     .aead_padding()
+    ///     .update(b"chunk1")?
+    ///     .update(b"chunk2")?
+    ///     .update(b"chunk3")?
+    ///     .finalize();
+    /// # Ok(()) }
+    /// ```
+    pub fn finalize(self) -> Tag {
+        finalize_aead(self.poly1305, self.accum_len)
+    }
+}
+
+/// Represents an ongoing streaming MAC computation, allowing incremental updates.
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+///
+/// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+/// let key: Key = [42u8; 32].into();
+/// let tag = Poly1305::new(key.as_ref())
+///     .update(b"chunk1")?
+///     .update(b"chunk2")?
+///     .update(b"chunk3")?
+///     .finalize();
+/// # Ok(()) }
+/// ```
+pub struct StreamPoly1305 {
+    poly1305: Poly1305<Streaming>,
+    to_pad: u8
+}
+
+impl From<StreamPoly1305> for Unspecified {
+    #[inline]
+    fn from(value: StreamPoly1305) -> Self {
+        value.poly1305.into()
+    }
+}
+
+opaque_dbg! { StreamPoly1305 }
+
+impl StreamPoly1305 {
+    /// Creates a new `StreamPoly1305` instance from its parts.
+    ///
+    /// # Arguments
+    ///
+    /// * `poly1305` - The `Poly1305` instance in the `Streaming` state.
+    /// * `accum_len` - The accumulated length of the input data.
+    ///
+    /// # Returns
+    ///
+    /// A new `StreamPoly1305` instance.
+    const fn from_parts(poly1305: Poly1305<Streaming>, len: u32) -> Self {
+        Self { poly1305, to_pad: update_to_pad(0, len) }
+    }
+
+    /// Updates the streaming MAC computation with additional input.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - A byte slice representing the additional data to include.
+    ///
+    /// # Errors
+    ///
+    /// The length of the `input` was greater than [`u32::MAX`].
     ///
     /// # Example
     ///
@@ -623,13 +860,78 @@ impl StreamPoly1305 {
     ///     .finalize();
     /// # Ok(()) }
     /// ```
+    pub fn update(mut self, input: &[u8]) -> Result<Self, Self> {
+        if let Some(len) = to_u32(input.len()) {
+            self.to_pad = update_to_pad(self.to_pad, len);
+            unsafe { self.poly1305.update_unchecked(input) };
+            Ok(self)
+        } else {
+            Err(self)
+        }
+    }
+
+    /// Finalizes the streaming MAC computation and returns the resulting `Tag`.
+    ///
+    /// # Returns
+    ///
+    /// The associated authentication [`Tag`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let key: Key = [42u8; 32].into();
+    ///
+    /// let tag = Poly1305::new(key.as_ref())
+    ///     .update(b"chunk1")?
+    ///     .update(b"chunk2")?
+    ///     .update(b"chunk3")?
+    ///     .finalize();
+    /// # Ok(()) }
+    /// ```
+    #[inline]
     pub fn finalize(self) -> Tag {
-        finalize(self.poly1305, self.accum_len)
+        finalize(self.poly1305, self.to_pad as u32)
+    }
+
+    /// Finalizes the constant-time streaming MAC computation and returns the resulting `Tag`.
+    ///
+    /// # Note
+    ///
+    /// It is far more common in practice to use to pad the [`finalize`] method. This is only here
+    /// `XSalsa20Poly1305`.
+    ///
+    /// # Returns
+    ///
+    /// The associated authentication [`Tag`] representing all updates and the total length of the
+    /// updates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// let key: Key = [42u8; 32].into();
+    /// let tag = Poly1305::new(key.as_ref())
+    ///     .update(b"chunk1").unwrap()
+    ///     .update(b"chunk2").unwrap()
+    ///     .finalize_no_padding();
+    /// ```
+    ///
+    /// [`finalize`]: Self::finalize
+    #[inline]
+    pub fn finalize_no_padding(self) -> Tag {
+        finalize_no_pad(self.poly1305)
     }
 }
 
 /// Provides a constant-time interface for updating the MAC computation, enhancing resistance
 /// against side-channel attacks.
+///
+/// This uses the recent TLS AEAD padding scheme on finalization, if this is not desired see
+/// [`CtPoly1305`].
 ///
 /// # Example
 ///
@@ -638,21 +940,65 @@ impl StreamPoly1305 {
 ///
 /// let key: Key = [42u8; 32].into();
 /// let ct_poly = Poly1305::new(key.as_ref())
+///     .aead_padding_ct()
 ///     .update_ct(b"constant time ")
 ///     .update_ct(b"chunk")
 ///     .finalize()
 ///     .unwrap();
 /// ```
 #[must_use]
-pub struct CtPoly1305 {
+pub struct CtPoly1305Aead {
     poly1305: Poly1305<Streaming>,
     result: Res,
     accum_len: u32
 }
 
-opaque_dbg! { CtPoly1305 }
+opaque_dbg! { CtPoly1305Aead }
 
-impl CtPoly1305 {
+/// Creates a mask based on the slice length for constant-time adjustments.
+///
+/// # Arguments
+///
+/// * `len` - The length of the slice.
+///
+/// # Returns
+///
+/// If the length of the slice is greater than [`u32::MAX`] this will return all zeroes,
+/// otherwise this will return all ones.
+#[inline(always)]
+#[must_use]
+const fn slice_len_mask(len: usize) -> usize {
+    (can_cast_u32(len) as usize).wrapping_neg()
+}
+
+/// Adjusts the input slice based on the mask to ensure constant-time operations.
+///
+/// # Arguments
+///
+/// * `slice` - The input byte slice to adjust.
+///
+/// # Returns
+///
+/// A tuple containing the adjusted slice and the resulting `Res` state.
+#[inline(always)]
+fn adjust_slice(slice: &[u8]) -> (&[u8], Res) {
+    let mask = slice_len_mask(slice.len());
+
+    // So, of course, this isn't pure constant time. It has variable timing for lengths,
+    // though so does poly1305, and practically everything. Only way to avoid this is masking
+    // the computation which will never be perfect.
+    //
+    // Though, it does allow us to not need any early exit, the position of this error across
+    // multiple updates is not leaked via timing.
+    //
+    // So, there is variance in timing under this error yes, but this is given as at some point
+    // (finalize) there must be some branch to ensure the operation was successful and that
+    // the authentication code genuinely corresponds to the provided messages. With this
+    // approach there is a **reduction** in timing leakage, not a complete elimination of it.
+    (&slice[..(slice.len() & mask)], Res(mask != 0))
+}
+
+impl CtPoly1305Aead {
     /// Creates a new `CtPoly1305` instance from its parts.
     ///
     /// # Arguments
@@ -688,48 +1034,6 @@ impl CtPoly1305 {
         res
     }
 
-    /// Creates a mask based on the slice length for constant-time adjustments.
-    ///
-    /// # Arguments
-    ///
-    /// * `len` - The length of the slice.
-    ///
-    /// # Returns
-    ///
-    /// If the length of the slice is greater than [`u32::MAX`] this will return all zeroes,
-    /// otherwise this will return all ones.
-    #[inline(always)]
-    const fn slice_len_mask(len: usize) -> usize {
-        (can_cast_u32(len) as usize).wrapping_neg()
-    }
-
-    /// Adjusts the input slice based on the mask to ensure constant-time operations.
-    ///
-    /// # Arguments
-    ///
-    /// * `slice` - The input byte slice to adjust.
-    ///
-    /// # Returns
-    ///
-    /// A tuple containing the adjusted slice and the resulting `Res` state.
-    #[inline(always)]
-    fn adjust_slice(slice: &[u8]) -> (&[u8], Res) {
-        let mask = Self::slice_len_mask(slice.len());
-
-        // So, of course, this isn't pure constant time. It has variable timing for lengths,
-        // though so does poly1305, and practically everything. Only way to avoid this is masking
-        // the computation which will never be perfect.
-        //
-        // Though, it does allow us to not need any early exit, the position of this error across
-        // multiple updates is not leaked via timing.
-        //
-        // So, there is variance in timing under this error yes, but this is given as at some point
-        // (finalize) there must be some branch to ensure the operation was successful and that
-        // the authentication code genuinely corresponds to the provided messages. With this
-        // approach there is a **reduction** in timing leakage, not a complete elimination of it.
-        (&slice[..(slice.len() & mask)], Res(mask != 0))
-    }
-
     /// Adds more data to the constant-time streaming MAC computation.
     ///
     /// # Arguments
@@ -747,16 +1051,17 @@ impl CtPoly1305 {
     ///
     /// let key: Key = [42u8; 32].into();
     /// let ct_poly = Poly1305::new(key.as_ref())
+    ///     .aead_padding_ct()
     ///     .update_ct(b"chunk1")
     ///     .update_ct(b"chunk2")
     ///     .finalize()
     ///     .unwrap();
     /// ```
     pub fn update_ct(mut self, input: &[u8]) -> Self {
-        let (adjusted, mut res) = Self::adjust_slice(input);
+        let (adjusted, mut res) = adjust_slice(input);
         res.ensure(self.incr_accum(adjusted.len() as u32));
 
-        unsafe { self.poly1305.update_unchecked(input) };
+        unsafe { self.poly1305.update_unchecked(adjusted) };
 
         self.result.ensure(res);
         self
@@ -796,15 +1101,199 @@ impl CtPoly1305 {
     ///
     /// let key: Key = [42u8; 32].into();
     /// let tag = Poly1305::new(key.as_ref())
+    ///     .aead_padding_ct()
     ///     .update_ct(b"chunk1")
     ///     .update_ct(b"chunk2")
     ///     .finalize()
     ///     .unwrap();
     /// ```
     pub fn finalize(self) -> Result<Tag, Unspecified> {
-        let tag = finalize(self.poly1305, self.accum_len);
+        let tag = finalize_aead(self.poly1305, self.accum_len);
         self.result.unit_err(tag)
     }
+}
+
+/// Provides a constant-time interface for updating the MAC computation, enhancing resistance
+/// against side-channel attacks.
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+///
+/// let key: Key = [42u8; 32].into();
+/// let ct_poly = Poly1305::new(key.as_ref())
+///     .update_ct(b"constant time ")
+///     .update_ct(b"chunk")
+///     .finalize()
+///     .unwrap();
+/// ```
+#[must_use]
+pub struct CtPoly1305 {
+    poly1305: Poly1305<Streaming>,
+    result: Res,
+    to_pad: u8
+}
+
+opaque_dbg! { CtPoly1305 }
+
+impl CtPoly1305 {
+    /// Creates a new `CtPoly1305` instance from its parts.
+    ///
+    /// # Arguments
+    ///
+    /// * `poly1305` - The `Poly1305` instance in the `Streaming` state.
+    /// * `result` - The current `Res` state.
+    /// * `len` - The length of the input data. Used to compute the amount needed for padding
+    ///   overtime.
+    ///
+    /// # Returns
+    ///
+    /// A new `CtPoly1305` instance.
+    const fn from_parts(poly1305: Poly1305<Streaming>, result: Res, len: u32) -> Self {
+        Self {
+            poly1305,
+            result,
+            to_pad: update_to_pad(0, len)
+        }
+    }
+
+    /// Adds more data to the constant-time streaming MAC computation.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - A byte slice representing the additional data to include.
+    ///
+    /// # Returns
+    ///
+    /// The updated `CtPoly1305` instance.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// let key: Key = [42u8; 32].into();
+    /// let ct_poly = Poly1305::new(key.as_ref())
+    ///     .update_ct(b"chunk1")
+    ///     .update_ct(b"chunk2")
+    ///     .finalize()
+    ///     .unwrap();
+    /// ```
+    pub fn update_ct(mut self, input: &[u8]) -> Self {
+        let (adjusted, res) = adjust_slice(input);
+
+        // adjusted length will always be less than u32::MAX
+        self.to_pad = update_to_pad(self.to_pad, adjusted.len() as u32);
+
+        unsafe { self.poly1305.update_unchecked(adjusted) };
+
+        self.result.ensure(res);
+        self
+    }
+
+    /// Returns `true` if no errors have been encountered to this point.
+    #[must_use]
+    pub const fn is_ok(&self) -> bool { self.result.is_ok() }
+
+    /// Returns `true` if an error has been encountered at some point.
+    #[must_use]
+    pub const fn is_err(&self) -> bool {
+        self.result.is_err()
+    }
+
+    /// Finalizes the constant-time streaming MAC computation and returns the resulting `Tag`.
+    ///
+    /// # Returns
+    ///
+    /// The associated authentication [`Tag`] representing all updates and the total length of the
+    /// updates.
+    ///
+    /// # Errors
+    ///
+    /// The `CtPoly1305` instance accumulates errors throughout the updating process without
+    /// branching. The only error which could occur:
+    ///
+    /// One of the provided inputs had a length which was greater than [`u32::MAX`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// let key: Key = [42u8; 32].into();
+    /// let tag = Poly1305::new(key.as_ref())
+    ///     .update_ct(b"chunk1")
+    ///     .update_ct(b"chunk2")
+    ///     .finalize()
+    ///     .unwrap();
+    /// ```
+    pub fn finalize(self) -> Result<Tag, Unspecified> {
+        let tag = finalize(self.poly1305, self.to_pad as u32);
+        self.result.unit_err(tag)
+    }
+
+    /// Finalizes the constant-time streaming MAC computation and returns the resulting `Tag`.
+    ///
+    /// # Note
+    ///
+    /// It is far more common in practice to use to pad the [`finalize`] method. This is only here
+    /// `XSalsa20Poly1305`.
+    ///
+    /// # Returns
+    ///
+    /// The associated authentication [`Tag`] representing all updates and the total length of the
+    /// updates.
+    ///
+    /// # Errors
+    ///
+    /// The `CtPoly1305` instance accumulates errors throughout the updating process without
+    /// branching. The only error which could occur:
+    ///
+    /// One of the provided inputs had a length which was greater than [`u32::MAX`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::{Poly1305, poly1305::Key}, aead::Tag};
+    ///
+    /// let key: Key = [42u8; 32].into();
+    /// let tag = Poly1305::new(key.as_ref())
+    ///     .update_ct(b"chunk1")
+    ///     .update_ct(b"chunk2")
+    ///     .finalize_no_padding()
+    ///     .unwrap();
+    /// ```
+    ///
+    /// [`finalize`]: Self::finalize
+    pub fn finalize_no_padding(self) -> Result<Tag, Unspecified> {
+        let tag = finalize_no_pad(self.poly1305);
+        self.result.unit_err(tag)
+    }
+}
+
+#[cfg(test)]
+use poly1305::universal_hash::generic_array::{GenericArray, ArrayLength};
+
+#[cfg(test)]
+const fn rc_to_blocks<T, N: ArrayLength<T>>(data: &[T]) -> (&[GenericArray<T, N>], &[T]) {
+    let nb = data.len() / N::USIZE;
+    let (left, right) = data.split_at(nb * N::USIZE);
+    let p = left.as_ptr().cast::<GenericArray<T, N>>();
+    // SAFETY: we guarantee that `blocks` does not point outside `data`
+    // and `p` is valid for reads
+    #[allow(unsafe_code)]
+    let blocks = unsafe { core::slice::from_raw_parts(p, nb) };
+    (blocks, right)
+}
+
+#[cfg(test)]
+use poly1305::{Poly1305 as rc_Poly1305, universal_hash::{KeyInit, UniversalHash}};
+
+#[cfg(test)]
+fn construct_polys(key: [u8; 32]) -> (rc_Poly1305, Poly1305<Ready>) {
+    let rc_key = poly1305::Key::from_slice(key.as_slice());
+    (rc_Poly1305::new(rc_key), Poly1305::new(KeyRef::new(&key)))
 }
 
 #[cfg(test)]
@@ -813,8 +1302,9 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let key: Key = [69; 32].into();
+        let key: Key = [42u8; 32].into();
         let tag = Poly1305::new(key.as_ref())
+            .aead_padding_ct()
             .update_ct(b"hello world")
             .update_ct(b"good day to you")
             .update_ct(b"mmm yes mm yes indeed mm")
@@ -827,5 +1317,216 @@ mod tests {
             .unwrap();
 
         assert_eq!(tag, o_tag);
+    }
+
+    #[test]
+    fn rust_crypto_aligned() {
+        let key = [42u8; 32];
+        let (mut rc, wc) = construct_polys(key);
+        let data = b"hello world we operate equivalen";
+
+        let (blocks, _rem) = rc_to_blocks(data);
+
+        rc.update(blocks);
+        let rc_out = rc.finalize();
+
+        let wc_out = wc.update(data).unwrap().finalize();
+
+        assert_eq!(wc_out, rc_out.as_slice());
+    }
+
+    #[test]
+    fn rust_crypto_unaligned() {
+        let key = [42u8; 32];
+        let (mut rc, wc) = construct_polys(key);
+        let data = b"hello world we operate equivalently";
+
+        rc.update_padded(data);
+        let rc_tag = rc.finalize();
+        let tag = wc.update(data).unwrap().finalize();
+
+        assert_eq!(tag, rc_tag.as_slice());
+    }
+}
+
+#[cfg(kani)]
+const fn wc_to_pad(len_to_pad: u32) -> u32 {
+    ((-(len_to_pad as isize)) & 15) as u32
+}
+
+#[cfg(kani)]
+const fn wc_to_pad_64(len_to_pad: u64) -> u32 {
+    ((-(len_to_pad as i128)) & 15) as u32
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+    use crate::aes::test_utils::{BoundList, AnyList};
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(5_000))]
+
+        #[test]
+        fn wc_poly_is_eq_to_rc_poly(
+            key in any::<[u8; 32]>(),
+            data in any::<BoundList<1024>>()
+        ) {
+            let (mut rc, wc) = construct_polys(key);
+
+            rc.update_padded(data.as_slice());
+
+            let tag = wc.update(data.as_slice()).unwrap().finalize();
+            let rc_tag = rc.finalize();
+
+            prop_assert_eq!(tag, rc_tag.as_slice());
+        }
+
+        #[test]
+        fn wc_poly_multi_updates_is_eq_to_rc_poly_oneshot(
+            key in any::<[u8; 32]>(),
+            data in any::<AnyList<32, BoundList<256>>>()
+        ) {
+            let (mut rc, wc) = construct_polys(key);
+
+            let mut wc = wc.normal();
+
+            for input in data.as_slice() {
+                wc = wc.update(input.as_slice()).unwrap();
+            }
+
+            let joined = data.join();
+            rc.update_padded(joined.as_slice());
+
+            let tag = wc.finalize();
+            let rc_tag = rc.finalize();
+
+            prop_assert_eq!(tag, rc_tag.as_slice());
+        }
+
+        #[test]
+        fn multi_updates_is_eq_to_oneshot_tls_aead_scheme(
+            key in any::<Key>(),
+            data in any::<AnyList<32, BoundList<256>>>()
+        ) {
+            let mut updates = Poly1305::new(key.as_ref()).aead_padding();
+
+            for input in data.as_slice() {
+                updates = updates.update(input.as_slice()).unwrap();
+            }
+
+            let tag = updates.finalize();
+
+            let joined = data.join();
+            let m_tag = Poly1305::new(key).mac(joined.as_slice(), ()).unwrap();
+
+            prop_assert_eq!(tag, m_tag);
+        }
+
+        #[test]
+        fn multi_updates_ct_is_eq_to_normal(
+            key in any::<Key>(),
+            data in any::<AnyList<32, BoundList<256>>>()
+        ) {
+            let mut poly = Poly1305::new(key.as_ref()).normal();
+            let mut poly_ct = Poly1305::new(key.as_ref()).normal_ct();
+
+            for input in data.as_slice() {
+                poly = poly.update(input.as_slice()).unwrap();
+                poly_ct = poly_ct.update_ct(input.as_slice());
+            }
+
+            let tag = poly.finalize();
+            let tag_ct = poly_ct.finalize().unwrap();
+
+            prop_assert_eq!(tag, tag_ct);
+        }
+
+        #[test]
+        fn multi_updates_is_eq_oneshot(
+            key in any::<Key>(),
+            data in any::<AnyList<32, BoundList<256>>>()
+        ) {
+            let mut poly = Poly1305::new(key.as_ref()).normal();
+
+            for input in data.as_slice() {
+                poly = poly.update(input.as_slice()).unwrap();
+            }
+
+            let tag = poly.finalize();
+
+            let joined = data.join();
+            let o_tag = Poly1305::new(key)
+                .update(joined.as_slice()).unwrap()
+                .finalize();
+
+            prop_assert_eq!(tag, o_tag);
+        }
+
+        #[test]
+        fn multi_updates_ct_is_eq_oneshot(
+            key in any::<Key>(),
+            data in any::<AnyList<32, BoundList<256>>>()
+        ) {
+            let mut poly = Poly1305::new(key.as_ref()).normal_ct();
+
+            for input in data.as_slice() {
+                poly = poly.update_ct(input.as_slice());
+            }
+
+            let tag = poly.finalize().unwrap();
+
+            let joined = data.join();
+            let o_tag = Poly1305::new(key)
+                .update(joined.as_slice()).unwrap()
+                .finalize();
+
+            prop_assert_eq!(tag, o_tag);
+        }
+    }
+}
+
+#[cfg(kani)]
+mod proofs {
+    use kani::proof;
+    use super::*;
+
+    #[proof]
+    fn univ_update_to_pad_is_no_wrap_mask() {
+        let existing: u32 = kani::any();
+        let to_add: u32 = kani::any();
+
+        let utp = update_to_pad((existing & 15) as u8, to_add) as u64;
+        let genuine = ((existing as u64) + (to_add as u64)) & 15;
+
+        kani::assert(
+            utp == genuine,
+            "The wrapping addition must always be equivalent to non-wrapping output"
+        );
+    }
+
+    #[proof]
+    fn univ_update_to_pad_holds_for_wc_pad_algo() {
+        let start: u32 = kani::any();
+        let end: u32 = kani::any();
+
+        let utp = update_to_pad((start & 15) as u8, end);
+
+        kani::assert(
+            wc_to_pad(utp as u32) == wc_to_pad_64((start as u64) + (end as u64)),
+            "update_to_pad must be equivalent to the total length in the eyes of the wolfcrypt \
+            padding algorithm."
+        );
+    }
+
+    #[proof]
+    fn univ_mask_is_no_mask_to_wc_pad_algo() {
+        let some_num: u64 = kani::any();
+
+        kani::assert(
+            wc_to_pad_64(some_num & 15) == wc_to_pad_64(some_num),
+            "wolfcrypt's to pad must result in the same output for the input mask 15 and raw input"
+        )
     }
 }

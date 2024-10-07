@@ -30,7 +30,7 @@ macro_rules! smear {
 /// # Constant Time Verification
 ///
 /// To verify that this function is truly constant-time we leveraged `haybale-pitchfork` by
-/// UCSD PLSysSec.
+/// UCSD `PLSysSec`.
 ///
 /// ## Debug Build
 ///

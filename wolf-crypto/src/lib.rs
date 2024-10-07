@@ -1,3 +1,29 @@
+//! Safe bindings to wolfSSL's `wolfcrypt`
+//!
+//! This crate provides a well-tested, type-safe, zero-cost interface for wolfSSL's software
+//! cryptographic module `wolfcrypt`. It leverages Rust's type system to ensure correct usage
+//! of cryptographic primitives at compile-time.
+//!
+//! # Safety
+//!
+//! This crate uses Rust's type system and ownership model to prevent common cryptographic
+//! mistakes. However, this library cannot ensure you use the provided cryptographic primitives
+//! correctly in the broader context of your application to ensure overall security.
+//!
+//! # Performance
+//!
+//! The bindings are designed to be zero-cost, allowing direct use of the highly optimized
+//! `wolfcrypt` implementations without additional runtime overhead.
+//!
+//! The majority of the future performance improvements will be in enabling further hardware
+//! acceleration in the underlying `wolf-crypto-sys` crate.
+//!
+//! # Stability
+//!
+//! This library is currently in alpha. As such, there is no guarantee of API stability
+//! across any update. This crate follows semantic versioning.
+
+
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 #![warn(
@@ -12,6 +38,7 @@
 #![allow(clippy::module_name_repetitions)]
 // always checked in safe api
 #![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_lossless)]
 // this devalues things which actually require the must-use attribute
 #![allow(clippy::must_use_candidate)]
 // I am passing something which is 32 bits, so either half the size (more frequently) or the same
@@ -24,6 +51,16 @@
 #![allow(clippy::inline_always)]
 // I am doing constant time bitwise hacks
 #![allow(clippy::cast_sign_loss)]
+// for debug assertions
+#![allow(clippy::used_underscore_binding)]
+// why does clippy not look at the difference in size between variants or, just the impact
+// one variant has on the total size? Like this lint is somewhat aimed at performance optimization,
+// yet where it is giving me these warnings the size of Ok and Err are equivalent.
+#![allow(clippy::result_large_err)]
+// I may just want to be cautious.
+#![allow(clippy::redundant_pub_crate)]
+#![warn(missing_docs)]
+#![warn(clippy::tabs_in_doc_comments)]
 
 #[cfg(any(test, feature = "alloc"))]
 extern crate alloc;

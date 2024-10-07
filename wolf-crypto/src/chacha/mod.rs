@@ -1,7 +1,7 @@
 //! The `ChaCha20` Stream Cipher
 
 mod key;
-pub mod state;
+pub mod states;
 
 pub use key::{Key, KeyRef, GenericKey};
 use core::fmt;
@@ -17,7 +17,7 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use crate::buf::{GenericIv, U12};
 use crate::{can_cast_u32, const_can_cast_u32, lte, Unspecified};
-use state::{State, CanProcess, Init, NeedsIv, Ready, Streaming};
+use states::{State, CanProcess, Init, NeedsIv, Ready, Streaming};
 
 macro_rules! impl_fmt {
     ($(#[$meta:meta])* $trait:ident for $state:ident) => {
@@ -632,6 +632,7 @@ impl ChaCha20<Ready> {
         self.encrypt_into_exact(plain, &mut output).map(move |ni| (output, ni))
     }
 
+    /// Transitions the `ChaCha20` instance into the `Streaming` state for partial updates.
     pub const fn stream(self) -> ChaCha20<Streaming> {
         Self::new_with(self.inner)
     }
@@ -776,9 +777,10 @@ impl ChaCha20<Streaming> {
     /// * `plain` - The input to encrypt.
     /// * `cipher` - The buffer to store the encrypted data.
     ///
-    /// # Returns
-    ///
-    /// A `Res` indicating the success or failure of the operation.
+    /// # Errors
+    /// 
+    /// - The length of `cipher` is less than the length of `plain`.
+    /// - The length of `plain` is greater than [`u32::MAX`].
     #[inline]
     pub fn encrypt_into(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<(), Unspecified> {
         self.process(plain, cipher)

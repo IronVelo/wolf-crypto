@@ -4,6 +4,7 @@ use core::fmt;
 
 
 /// A generic representation of additional authenticated data (AAD)
+#[allow(clippy::missing_safety_doc)]
 pub unsafe trait Aad: Sealed {
     /// Returns the length of the [`ptr`] result, represented as a `u32`.
     ///
@@ -98,7 +99,12 @@ impl<'s> AadSlice<'s> {
             None => core::ptr::null()
         }
     }
-
+    
+    /// Returns the length of the underlying slice if it can be represented as a [`u32`].
+    /// 
+    /// # Note
+    /// 
+    /// [`AadSlice::EMPTY`] will always return `Some(0)`.
     #[inline(always)]
     #[must_use]
     pub const fn size(&self) -> Option<u32> {
@@ -108,6 +114,7 @@ impl<'s> AadSlice<'s> {
         }
     }
 
+    /// Returns `true` if the length of the underlying slice can be safely represented as a [`u32`].
     #[inline]
     #[must_use]
     pub const fn valid_size(&self) -> bool {
@@ -283,20 +290,15 @@ impl<T: Sealed> Sealed for Option<T> {}
 unsafe impl<T: Aad> Aad for Option<T> {
     #[inline]
     fn try_size(&self) -> Option<u32> {
-        match self {
-            None => Some(0),
-            Some(inner) => inner.try_size()
-        }
+        self.as_ref().map_or(Some(0), Aad::try_size)
     }
     #[inline]
     fn ptr(&self) -> *const u8 {
-        match self {
-            None => core::ptr::null(),
-            Some(inner) => inner.ptr()
-        }
+        self.as_ref().map_or(core::ptr::null(), Aad::ptr)
     }
     #[inline]
     unsafe fn size(&self) -> u32 {
+        #[allow(clippy::option_if_let_else)]
         match self {
             None => 0,
             Some(inner) => inner.size()
@@ -304,10 +306,7 @@ unsafe impl<T: Aad> Aad for Option<T> {
     }
     #[inline]
     fn is_valid_size(&self) -> bool {
-        match self {
-            None => true,
-            Some(inner) => inner.is_valid_size()
-        }
+        self.as_ref().map_or(true, Aad::is_valid_size)
     }
 }
 

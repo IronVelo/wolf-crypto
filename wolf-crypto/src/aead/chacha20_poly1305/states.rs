@@ -8,6 +8,9 @@ use core::ffi::c_int;
 use wolf_crypto_sys::{CHACHA20_POLY1305_AEAD_DECRYPT, CHACHA20_POLY1305_AEAD_ENCRYPT};
 use crate::sealed::Sealed;
 
+/// Represents the possible states that the [`ChaCha20Poly1305`] AEAD may be in.
+///
+/// [`ChaCha20Poly1305`]: crate::aead::ChaCha20Poly1305
 pub trait State: Sealed {}
 
 define_state! {
@@ -49,13 +52,13 @@ define_state! {
     Decrypt,
 }
 
-/// Indicates that the cipher can perform data updates in the current state.
+/// Indicates that the cipher can process data in its current state.
 pub trait CanUpdate: State {
     /// The mode (encryption or decryption) associated with this state.
     type Mode: Updating;
 }
 
-/// Implemented by the two modes who can finalize the AEAD, as well as initialize it.
+/// Defines the behavior for states that can perform the main AEAD operations.
 pub trait Updating: CanUpdate {
     /// The initial state type when starting the AEAD operation.
     type InitState: CanSetAad;
@@ -66,14 +69,23 @@ pub trait Updating: CanUpdate {
     fn direction() -> c_int;
 }
 
+/// Indicates that the cipher can update Additional Authenticated Data (AAD) in its current state.
 pub trait CanUpdateAad: State {
+    /// The mode (encryption or decryption) associated with this state.
     type Updating: UpdatingAad;
 }
+
+/// Indicates that the cipher can either set AAD or proceed to data processing.
 pub trait CanSetAad: CanUpdateAad + CanUpdate {
+    /// The mode (encryption or decryption) associated with this state.
     type Mode: Updating;
+    /// The associated state for streaming AAD updates.
     type Updating: UpdatingAad;
 }
+
+/// Defines the behavior for states that are actively updating AAD.
 pub trait UpdatingAad: CanUpdateAad {
+    /// The mode (encryption or decryption) associated with this state. 
     type Mode: Updating;
 }
 
@@ -136,7 +148,7 @@ impl UpdatingAad for DecryptAad {
 // ---
 
 impl CanUpdate for Decrypt {
-    type Mode = Decrypt;
+    type Mode = Self;
 }
 impl Updating for Decrypt {
     type InitState = DecryptMaybeAad;

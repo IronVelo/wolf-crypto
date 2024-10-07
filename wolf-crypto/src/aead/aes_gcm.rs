@@ -59,9 +59,14 @@ impl AesGcm {
     /// * `output` - The output buffer to store the encrypted data.
     /// * `aad` - Additional Authenticated Data.
     ///
+    /// # Errors
+    /// 
+    /// - The size of `input` is greater than [`u32::MAX`].
+    /// - The provided AAD's length is greater than [`u32::MAX`].
+    /// 
     /// # Returns
     ///
-    /// The authentication tag on success, or an error.
+    /// The associated authentication [`Tag`].
     ///
     /// # Example
     ///

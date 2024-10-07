@@ -103,7 +103,7 @@ impl Key {
 
 impl Zeroize for Key {
     fn zeroize(&mut self) {
-        self.zero()
+        self.zero();
     }
 }
 

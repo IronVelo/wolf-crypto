@@ -639,7 +639,7 @@ impl ChaCha20Poly1305<Init> {
             K: GenericKey,
             IV: GenericIv<Size = U12>
     {
-        ChaCha20Poly1305::new::<Encrypt>(key, iv)
+        Self::new::<Encrypt>(key, iv)
     }
 
     /// Create a new [`ChaCha20Poly1305`] instance for decryption.
@@ -671,7 +671,7 @@ impl ChaCha20Poly1305<Init> {
             K: GenericKey,
             IV: GenericIv<Size = U12>
     {
-        ChaCha20Poly1305::new::<Decrypt>(key, iv)
+        Self::new::<Decrypt>(key, iv)
     }
 }
 

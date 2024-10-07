@@ -2,24 +2,32 @@ use crate::sealed::Sealed;
 use zeroize::Zeroize;
 use core::fmt;
 
+/// Abstracts over different key types used in [`ChaCha20`].
+///
+/// [`ChaCha20`]: crate::chacha::ChaCha20
 pub trait GenericKey : Sealed {
+    /// Returns a slice of the key data
     fn slice(&self) -> &[u8];
+    /// Returns the size of the key in bytes
     fn size(&self) -> u32;
 }
 
 macro_rules! basic_key_api {
     ($ident:ident $($lt:lifetime)?) => {
+        #[allow(clippy::len_without_is_empty)] // when is a key empty?
         impl $(<$lt>)? $ident $(<$lt>)? {
+            /// Creates a new 128-bit key
             #[inline]
             pub const fn new_128(key: $(&$lt)? [u8; 16]) -> Self {
                 Self::B128(key)
             }
-
+            /// Creates a new 256-bit key
             #[inline]
             pub const fn new_256(key: $(&$lt)? [u8; 32]) -> Self {
                 Self::B256(key)
             }
 
+            /// Returns the length of the key in bytes
             #[inline]
             pub const fn len(&self) -> u32 {
                 match self {
@@ -41,6 +49,7 @@ macro_rules! basic_key_api {
                 }
             }
 
+            /// Returns a slice of the key data
             #[inline]
             pub const fn as_slice(&self) -> &[u8] {
                 match self {
@@ -87,9 +96,14 @@ macro_rules! basic_key_api {
     };
 }
 
+/// Represents either a 128-bit or 256-bit [`ChaCha20`] key.
+///
+/// [`ChaCha20`]: crate::chacha::ChaCha20
 #[must_use]
 pub enum Key {
+    /// 128-bit key.
     B128([u8; 16]),
+    /// 256-bit key.
     B256([u8; 32])
 }
 
@@ -103,6 +117,7 @@ arb_key! {
 }
 
 impl Key {
+    /// Returns a mutable slice of the key data
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         match self {
@@ -111,6 +126,7 @@ impl Key {
         }
     }
 
+    /// Creates a [`KeyRef`] referencing the underlying key material.
     #[inline]
     pub const fn as_ref(&self) -> KeyRef {
         match self {
@@ -123,11 +139,12 @@ impl Key {
 impl Zeroize for Key {
     #[inline]
     fn zeroize(&mut self) {
-        self.as_mut_slice().zeroize()
+        self.as_mut_slice().zeroize();
     }
 }
 
 impl Drop for Key {
+    /// Automatically zeroes the key when it's dropped.
     #[inline]
     fn drop(&mut self) {
         self.zeroize();
@@ -135,6 +152,9 @@ impl Drop for Key {
 }
 
 impl From<[u8; 16]> for Key {
+    /// Convert a 16 byte array to a 128-bit [`Key`] for [`ChaCha20`].
+    ///
+    /// [`ChaCha20`]: crate::chacha::ChaCha20
     #[inline]
     fn from(value: [u8; 16]) -> Self {
         Self::B128(value)
@@ -142,19 +162,28 @@ impl From<[u8; 16]> for Key {
 }
 
 impl From<[u8; 32]> for Key {
+    /// Convert a 32 byte array to a 256-bit [`Key`] for [`ChaCha20`].
+    ///
+    /// [`ChaCha20`]: crate::chacha::ChaCha20
     #[inline]
     fn from(value: [u8; 32]) -> Self {
         Self::B256(value)
     }
 }
 
+/// Represents either a 128-bit or 256-bit [`ChaCha20`] key.
+///
+/// [`ChaCha20`]: crate::chacha::ChaCha20
 #[must_use]
 pub enum KeyRef<'r> {
+    /// 128-bit key.
     B128(&'r [u8; 16]),
+    /// 256-bit key.
     B256(&'r [u8; 32])
 }
 
 impl<'r> KeyRef<'r> {
+    /// Copies the underlying key material into a new [`Key`] instance.
     #[inline]
     pub const fn copy(&self) -> Key {
         match *self {
@@ -167,6 +196,9 @@ impl<'r> KeyRef<'r> {
 basic_key_api! { KeyRef 'r }
 
 impl<'r> From<&'r [u8; 16]> for KeyRef<'r> {
+    /// Convert a reference to a 16 byte array to a 128-bit [`KeyRef`] for [`ChaCha20`].
+    ///
+    /// [`ChaCha20`]: crate::chacha::ChaCha20
     #[inline]
     fn from(value: &'r [u8; 16]) -> Self {
         Self::B128(value)
@@ -174,6 +206,9 @@ impl<'r> From<&'r [u8; 16]> for KeyRef<'r> {
 }
 
 impl<'r> From<&'r [u8; 32]> for KeyRef<'r> {
+    /// Convert a reference to a 32 byte array to a 256-bit [`KeyRef`] for [`ChaCha20`].
+    ///
+    /// [`ChaCha20`]: crate::chacha::ChaCha20
     #[inline]
     fn from(value: &'r [u8; 32]) -> Self {
         Self::B256(value)

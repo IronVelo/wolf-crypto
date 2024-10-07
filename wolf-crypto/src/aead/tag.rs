@@ -87,3 +87,56 @@ impl PartialEq for Tag {
         unsafe { wc_ChaCha20Poly1305_CheckTag(self.as_ptr(), other.as_ptr()) == 0 }
     }
 }
+
+impl PartialEq<[u8; 16]> for Tag {
+    /// Constant Time Equivalence
+    #[inline]
+    fn eq(&self, other: &[u8; 16]) -> bool {
+        use wolf_crypto_sys::wc_ChaCha20Poly1305_CheckTag;
+        unsafe { wc_ChaCha20Poly1305_CheckTag(self.as_ptr(), other.as_ptr()) == 0 }
+    }
+}
+
+impl PartialEq<[u8]> for Tag {
+    /// Constant Time Equivalence (variable timing for length of `other`)
+    #[inline]
+    fn eq(&self, other: &[u8]) -> bool {
+        use wolf_crypto_sys::wc_ChaCha20Poly1305_CheckTag;
+        if other.len() != Self::CAPACITY { return false; }
+        unsafe { wc_ChaCha20Poly1305_CheckTag(self.as_ptr(), other.as_ptr()) == 0 }
+    }
+}
+
+impl PartialEq<Tag> for [u8; 16] {
+    /// Constant Time Equivalence
+    #[inline]
+    fn eq(&self, other: &Tag) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialEq<Tag> for [u8] {
+    /// Constant Time Equivalence (variable timing for length of `self`)
+    #[inline]
+    fn eq(&self, other: &Tag) -> bool {
+        other.eq(self)
+    }
+}
+
+impl<T> PartialEq<&T> for Tag where Self: PartialEq<T>, T: ?Sized {
+    /// `PartialEq` for references of types which already can be compared to `Tag` in constant
+    /// time.
+    #[inline]
+    fn eq(&self, other: &&T) -> bool {
+        self.eq(*other)
+    }
+}
+
+impl<T> PartialEq<&mut T> for Tag where Self: PartialEq<T>, T: ?Sized {
+    /// `PartialEq` for references of types which already can be compared to `Tag` in constant
+    /// time.
+    #[inline]
+    fn eq(&self, other: &&mut T) -> bool {
+        self.eq(*other)
+    }
+}

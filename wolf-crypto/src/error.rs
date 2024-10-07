@@ -80,6 +80,7 @@ no_std_io! {
 ///     Ok(42)
 /// );
 /// ```
+#[allow(clippy::missing_errors_doc)]
 pub trait MakeOpaque<T> {
     /// Transforms the `Result<T, E>` into a `Result<T, Unspecified>`.
     ///
@@ -144,6 +145,7 @@ pub trait MakeOpaque<T> {
     fn opaque_map<F: FnOnce(T) -> N, N>(self, op: F) -> Result<N, Unspecified>;
 }
 
+#[allow(clippy::option_if_let_else)]
 impl<T, E> MakeOpaque<T> for Result<T, E> {
     #[inline]
     fn opaque(self) -> Result<T, Unspecified> {
