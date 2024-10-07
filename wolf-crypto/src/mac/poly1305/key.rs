@@ -56,8 +56,7 @@ impl Key {
     /// ```rust
     /// use wolf_crypto::mac::poly1305::Key;
     ///
-    /// let key_bytes = [0u8; 32];
-    /// let key = Key::new(key_bytes,);
+    /// let key = Key::new([0u8; 32]);
     /// # drop(key);
     /// ```
     pub const fn new(inner: [u8; KEY_SIZE]) -> Self {
@@ -75,8 +74,7 @@ impl Key {
     /// ```rust
     /// use wolf_crypto::mac::poly1305::{Key, KeyRef};
     ///
-    /// let key_bytes = [0u8; 32];
-    /// let key = Key::new(key_bytes,);
+    /// let key = Key::new([0u8; 32]);
     /// let key_ref: KeyRef = key.as_ref();
     /// # drop(key_ref); drop(key);
     /// ```
