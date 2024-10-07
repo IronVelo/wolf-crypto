@@ -165,3 +165,65 @@ macro_rules! arb_key {
         }
     }
 }
+
+#[cfg(test)]
+macro_rules! logic {
+    (($premise:expr) ==> ($conclusion:expr)) => {
+        !($premise) || $conclusion
+    };
+    (($conclusion:expr) <== ($premise:expr)) => {
+        logic!(($premise) ==> ($conclusion))
+    };
+    (($a:expr) <==> ($b:expr)) => {
+        logic!(($a) ==> ($b)) && logic!(($a) <== ($b))
+    }
+}
+
+#[cfg(test)]
+/// Basic macro just so that I can think more clearly about my assertions with infix notation.
+macro_rules! ensure {
+    // implications
+    (($premise:expr) ==> ($conclusion:expr)) => {
+        #[cfg(not(kani))] {
+            assert!(
+                logic!(($premise) ==> ($conclusion)),
+                concat!(stringify!($premise), " -> ", stringify!($conclusion))
+            );
+        }
+        #[cfg(kani)] {
+            kani::assert(
+                logic!(($premise) ==> ($conclusion)),
+                concat!(stringify!($premise), " -> ", stringify!($conclusion))
+            );
+        }
+    };
+    (($conclusion:expr) <== ($premise:expr)) => {
+        #[cfg(not(kani))] {
+            assert!(
+                logic!(($conclusion) <== ($premise)),
+                concat!(stringify!($conclusion), " <- ", stringify!($premise))
+            );
+        }
+        #[cfg(kani)] {
+            kani::assert(
+                logic!(($conclusion) <== ($premise)),
+                concat!(stringify!($conclusion), " <- ", stringify!($premise))
+            );
+        }
+    };
+    // biconditional
+    (($a:expr) <==> ($b:expr)) => {
+        #[cfg(not(kani))] {
+            assert!(
+                logic!(($a) <==> ($b)),
+                concat!(stringify!($a), " <-> ", stringify!($b))
+            )
+        }
+        #[cfg(kani)] {
+            kani::assert(
+                logic!(($a) <==> ($b)),
+                concat!(stringify!($a), " <-> ", stringify!($b))
+            )
+        }
+    };
+}

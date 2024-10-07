@@ -30,7 +30,6 @@ extern crate alloc;
 
 #[cfg(test)]
 extern crate std;
-// extern crate core;
 
 #[macro_use]
 mod macros;
@@ -52,6 +51,7 @@ non_fips! { // unfortunate
 
 pub mod aead;
 pub mod mac;
+pub(crate) mod ct;
 
 pub use error::Unspecified;
 pub use error::MakeOpaque;

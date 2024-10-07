@@ -39,6 +39,32 @@
 //! assert_ne!(bad_tag, tag);
 //! # Ok(()) }
 //! ```
+//!
+//! ## Note
+//!
+//! The first test may be concerning, it is not. `Poly1305` was originally designed to be
+//! [paired with `AES`][1], this example only would take place if the cipher it is paired with
+//! is fundamentally broken. More explicitly, the cipher would need to be an identity function for
+//! the first 32 bytes, meaning not encrypt the first 32 bytes in any way shape or form.
+//!
+//! The author of `Poly1305` ([Daniel J. Bernstein][2]) also created [`Salsa20` (`Snuffle 2005`)][3],
+//! and then [`ChaCha`][4], which `Poly1305` generally complements for authentication.
+//!
+//! ## Security
+//!
+//! `Poly1305` is meant to be used with a **one-time key**, key reuse in `Poly1305` can be
+//! devastating. When pairing with something like [`ChaCha20Poly1305`] this requirement is handled
+//! via the discreteness of the initialization vector (more reason to never reuse initialization
+//! vectors).
+//!
+//! If you are using `Poly1305` directly, each discrete message you authenticate must leverage
+//! fresh key material.
+//!
+//! [1]: https://cr.yp.to/mac/poly1305-20050329.pdf
+//! [2]: https://cr.yp.to/djb.html
+//! [3]: https://cr.yp.to/snuffle.html
+//! [4]: https://cr.yp.to/chacha/chacha-20080128.pdf
+//! [`ChaCha20Poly1305`]: crate::aead::ChaCha20Poly1305
 
 
 use wolf_crypto_sys::{
@@ -61,6 +87,7 @@ use crate::opaque_res::Res;
 use crate::{can_cast_u32, to_u32, Unspecified};
 use core::marker::PhantomData;
 use crate::aead::{Aad, Tag};
+use crate::ct;
 
 // INFALLIBILITY COMMENTARY
 //
@@ -169,55 +196,6 @@ use crate::aead::{Aad, Tag};
 //
 // END COMMENTARY
 
-macro_rules! smear {
-    ($b:ident) => {{
-        $b |= $b >> 1;
-        $b |= $b >> 2;
-        $b |= $b >> 4;
-        $b |= $b >> 8;
-        $b |= $b >> 16;
-    }};
-}
-
-/// Performs a constant-time greater-than comparison.
-///
-/// # Arguments
-///
-/// * `left` - The left-hand side operand.
-/// * `right` - The right-hand side operand.
-///
-/// # Returns
-///
-/// Returns `1` if `left > right`, otherwise `0`.
-const fn ct_gt(left: u32, right: u32) -> u32 {
-    let gtb = left & !right;
-    let mut ltb = !left & right;
-
-    smear!(ltb);
-
-    let mut bit = gtb & !ltb;
-    // smear the highest set bit
-    smear!(bit);
-
-    bit & 1
-}
-
-/// Performs constant-time addition without wrapping on overflow.
-///
-/// # Arguments
-///
-/// * `a` - The first operand.
-/// * `b` - The second operand.
-///
-/// # Returns
-///
-/// A tuple containing the sum and a `Res` indicating if there was no overflow.
-#[inline]
-const fn ct_add_no_wrap(a: u32, b: u32) -> (u32, Res) {
-    let overflow = ct_gt(b, u32::MAX.wrapping_sub(a));
-    let sum = a.wrapping_add(b & (!overflow.wrapping_neg()));
-    (sum, Res(overflow == 0))
-}
 
 /// The `Poly1305` Message Authentication Code (MAC)
 ///
@@ -574,7 +552,7 @@ impl StreamPoly1305 {
     /// A `Res` indicating the success or failure of the operation.
     #[inline(always)]
     fn incr_accum(&mut self, len: u32) -> Res {
-        let (accum_len, res) = ct_add_no_wrap(self.accum_len, len);
+        let (accum_len, res) = ct::add_no_wrap(self.accum_len, len);
         self.accum_len = accum_len;
         res
     }
@@ -584,10 +562,6 @@ impl StreamPoly1305 {
     /// # Arguments
     ///
     /// * `input` - A byte slice representing the additional data to include.
-    ///
-    /// # Returns
-    ///
-    /// `Self` for chaining updates. If taking ownership is not desired, see [`update_streaming`].
     ///
     /// # Errors
     ///
@@ -609,8 +583,6 @@ impl StreamPoly1305 {
     ///     .finalize();
     /// # Ok(()) }
     /// ```
-    ///
-    /// [`update_streaming`]: Self::update_streaming
     pub fn update(mut self, input: &[u8]) -> Result<Self, Self> {
         if let Some(input_len) = to_u32(input.len()) {
             into_result!(self.incr_accum(input_len),
@@ -711,7 +683,7 @@ impl CtPoly1305 {
     /// `Res` indicating if the operation would have overflowed the internal length.
     #[inline(always)]
     fn incr_accum(&mut self, len: u32) -> Res {
-        let (accum_len, res) = ct_add_no_wrap(self.accum_len, len);
+        let (accum_len, res) = ct::add_no_wrap(self.accum_len, len);
         self.accum_len = accum_len;
         res
     }
@@ -743,6 +715,18 @@ impl CtPoly1305 {
     #[inline(always)]
     fn adjust_slice(slice: &[u8]) -> (&[u8], Res) {
         let mask = Self::slice_len_mask(slice.len());
+
+        // So, of course, this isn't pure constant time. It has variable timing for lengths,
+        // though so does poly1305, and practically everything. Only way to avoid this is masking
+        // the computation which will never be perfect.
+        //
+        // Though, it does allow us to not need any early exit, the position of this error across
+        // multiple updates is not leaked via timing.
+        //
+        // So, there is variance in timing under this error yes, but this is given as at some point
+        // (finalize) there must be some branch to ensure the operation was successful and that
+        // the authentication code genuinely corresponds to the provided messages. With this
+        // approach there is a **reduction** in timing leakage, not a complete elimination of it.
         (&slice[..(slice.len() & mask)], Res(mask != 0))
     }
 
@@ -843,79 +827,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(tag, o_tag);
-    }
-}
-
-#[cfg(test)]
-/// Basic macro just so that I can think more clearly about my assertions with infix notation.
-macro_rules! ensure {
-    // implications
-    (($left:expr) ==> ($right:expr)) => {
-        if $left {
-            assert!($right, concat!(stringify!($left), " -> ", stringify!($right)));
-        }
-    };
-    (kani ($left:expr) ==> ($right:expr)) => {
-        if $left {
-            kani::assert($right, concat!(stringify!($left), " -> ", stringify!($right)));
-        }
-    };
-    (($left:expr) <== ($right:expr)) => {
-        if $right {
-            assert!($left, concat!(stringify!($left), " <- ", stringify!($right)));
-        }
-    };
-    (kani ($left:expr) <== ($right:expr)) => {
-        if $right {
-            kani::assert($left, concat!(stringify!($left), " <- ", stringify!($right)));
-        }
-    };
-    // biconditional
-    (($a:expr) <==> ($b:expr)) => {{
-        ensure!(($a) ==> ($b));
-        ensure!(($a) <== ($b));
-    }};
-    (kani ($a:expr) <==> ($b:expr)) => {
-        kani::assert(
-            kani::implies!($a => $b) && kani::implies!($b => $a),
-            concat!(stringify!($a), " <-> ", stringify!($b))
-        )
-    };
-}
-
-#[cfg(test)]
-mod ct_arithmetic_property_tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(300_000))]
-
-        #[test]
-        fn enusre_ct_add_no_wrap(a in any::<u32>(), b in any::<u32>()) {
-            let (out, res) = ct_add_no_wrap(a, b);
-
-            ensure!(( res.is_err() ) <==> ( a.checked_add(b).is_none() ));
-            ensure!(( out == a )     <==> ( res.is_err() || b == 0 ));
-            ensure!(( res.is_ok() )  <==> ( out != a || b == 0 ));
-        }
-    }
-}
-
-#[cfg(kani)]
-mod ct_arithmetic_checks {
-    use super::*;
-    use kani::proof;
-
-    #[proof]
-    fn check_ct_add_no_wrap() {
-        let a = kani::any();
-        let b = kani::any();
-
-        let (out, res) = ct_add_no_wrap(a, b);
-
-        ensure!(kani ( res.is_err() ) <==> ( a.checked_add(b).is_none() ));
-        ensure!(kani ( out == a )     <==> ( res.is_err() || b == 0 ));
-        ensure!(kani ( res.is_ok() )  <==> ( out != a || b == 0 ));
     }
 }
