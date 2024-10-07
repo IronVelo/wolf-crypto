@@ -10,6 +10,13 @@ repository = "https://github.com/CleveGreen/wolf-crypto/tree/main/wolf-crypto"
 documentation = "https://docs.rs/wolf-crypto"
 readme = "README.md"
 description = "Safe and thin API for wolfSSL's wolfcrypt"
+exclude = [
+    "llvm",
+    "*~",
+    "*.bc",
+    "*.ll",
+    "benches"
+]
 
 [features]
 std = ["alloc"]
