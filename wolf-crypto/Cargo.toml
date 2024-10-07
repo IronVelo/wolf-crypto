@@ -1,6 +1,6 @@
 [package]
 name = "wolf-crypto"
-version = "0.1.0-alpha.9"
+version = "0.1.0-alpha.10"
 edition = "2021"
 license = "GPL-2.0-only"
 categories = ["no-std", "cryptography"]
@@ -58,4 +58,4 @@ targets = ["x86_64-unknown-linux-gnu"]
 rustdoc-args = ["--cfg", "docsrs", "--generate-link-to-definition"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(llvm_ir_check)'] }
