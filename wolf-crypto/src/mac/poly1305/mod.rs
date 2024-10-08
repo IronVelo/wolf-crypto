@@ -515,7 +515,7 @@ impl Poly1305<Ready> {
     #[inline]
     pub fn update(mut self, input: &[u8]) -> Result<StreamPoly1305, Unspecified> {
         to_u32(input.len()).map_or(
-            Err(Unspecified), 
+            Err(Unspecified),
             |len| unsafe {
                 self.update_unchecked(input);
                 Ok(StreamPoly1305::from_parts(self.with_state(), len))
@@ -901,7 +901,7 @@ impl StreamPoly1305 {
     /// # Note
     ///
     /// It is far more common in practice to use to pad the [`finalize`] method. This is only here
-    /// `XSalsa20Poly1305`.
+    /// for `XSalsa20Poly1305`.
     ///
     /// # Returns
     ///
@@ -1238,7 +1238,7 @@ impl CtPoly1305 {
     /// # Note
     ///
     /// It is far more common in practice to use to pad the [`finalize`] method. This is only here
-    /// `XSalsa20Poly1305`.
+    /// for `XSalsa20Poly1305`.
     ///
     /// # Returns
     ///
