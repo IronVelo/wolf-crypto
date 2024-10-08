@@ -1,10 +1,12 @@
 //! Collection of marker types and their associated keys which denote the hashing function.
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 use wolf_crypto_sys::{
     WC_SHA224, WC_SHA256, WC_SHA384, WC_SHA512,
     WC_SHA3_224, WC_SHA3_256, WC_SHA3_384, WC_SHA3_512
 };
+
+use zeroize::Zeroize;
 
 use crate::sealed::HmacSealed as Sealed;
 use crate::buf::InvalidSize;
@@ -34,6 +36,9 @@ pub trait GenericKey : Sealed {
 
     /// Returns the size of the key in bytes.
     fn size(&self) -> u32;
+    
+    /// Zeroes the memory of the key if is owned.
+    fn cleanup(self);
 }
 
 /// Represent the output digest of the `HMAC` hash function.
@@ -128,6 +133,11 @@ macro_rules! make_digest {
                 fn size(&self) -> u32 {
                     <$name>::SIZE
                 }
+                
+                #[inline]
+                fn cleanup(mut self) {
+                    self.zeroize();
+                }
             }
 
             impl Sealed for &[u8; $sz] {}
@@ -144,6 +154,9 @@ macro_rules! make_digest {
                 fn size(&self) -> u32 {
                     <$name>::SIZE
                 }
+                
+                #[inline(always)]
+                fn cleanup(self) {}
             }
         )*
     };
@@ -172,6 +185,9 @@ impl<'k, SZ: KeySz> GenericKey for KeySlice<'k, SZ> {
         // KeySlice cannot be constructed with a slice which has a length greater than u32::MAX.
         self.inner.len() as u32
     }
+
+    #[inline(always)]
+    fn cleanup(self) {}
 }
 
 impl<'k, SZ: KeySz> KeySlice<'k, SZ> {
