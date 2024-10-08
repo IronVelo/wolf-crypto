@@ -71,3 +71,31 @@ If we are forced to continue making assumptions this list will expand. On every 
 
 - Note any areas of wolfcrypt's API that we're watching closely, which might need to be added to our
   checklist in the future.
+
+* External Device Offloading Support
+
+If we eventually leverage wolfcrypt's cryptography offloading to external devices such as Key Store,
+Secure Element, HSM, PKCS 11, or TPM, this will violate some infallibility assumptions in certain
+modules.
+
+If this is enabled under some feature flag, these APIs will need to return Result types for the
+circumstances in which these devices are not accessible.
+
+Under this support, the API may change under this feature flag to retain stability of the common
+path.
+
+Regardless of the direction taken, undefined behavior from potential errors introduced from this
+feature is completely unacceptable.
+
+* Acceleration
+
+** IMXRT1170 MCUs
+
+Currently, for the SHA2 family of hash functions, it is not confirmed that enabling the
+NXP CAAM proprietary acceleration will cause the associated functions to be fallible under
+our configuration.
+Confirming this, and acting accordingly is a requirement.
+
+** PIC32MZ MCUs
+
+This follows the same guidelines as IMXRT1170 MCUs (of course, this does not include NXP CAAM).
