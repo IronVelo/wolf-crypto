@@ -143,7 +143,7 @@ impl<H: algo::Hash> Hmac<H> {
         unsafe {
             // INFALLIBLE
             //
-            // See hash module commentary on all the associated hashing algorithm's final functions.
+            // See hash module commentary on all the associated hashing algorithms' final functions.
             let _res = wc_HmacFinal(
                 addr_of_mut!(self.inner),
                 output

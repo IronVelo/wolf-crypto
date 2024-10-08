@@ -36,17 +36,20 @@ pub trait GenericKey : Sealed {
 
     /// Returns the size of the key in bytes.
     fn size(&self) -> u32;
-    
+
     /// Zeroes the memory of the key if is owned.
     fn cleanup(self);
 }
 
 /// Represent the output digest of the `HMAC` hash function.
 pub trait Digest : Sealed {
+    #[doc(hidden)]
     #[must_use]
     fn zeroes() -> Self;
+    /// Returns the size of the digest in bytes.
     #[must_use]
     fn size() -> u32;
+    #[doc(hidden)]
     #[must_use]
     fn ptr(&mut self) -> *mut u8;
 }
@@ -65,8 +68,8 @@ pub trait Hash : Sealed {
     /// This library does not support using keys which do not follow this recommendation in the
     /// safe API. The unsafe API which does expose this is not public yet, and we are decided on
     /// whether it is worth including in the first place.
-    /// 
-    /// All modern usages of `HMAC`, for example in TLS, use the same key length as the digest 
+    ///
+    /// All modern usages of `HMAC`, for example in TLS, use the same key length as the digest
     /// length (`L`).
     ///
     /// [1]: https://www.rfc-editor.org/rfc/rfc2104#section-3
@@ -133,7 +136,7 @@ macro_rules! make_digest {
                 fn size(&self) -> u32 {
                     <$name>::SIZE
                 }
-                
+
                 #[inline]
                 fn cleanup(mut self) {
                     self.zeroize();
@@ -154,7 +157,7 @@ macro_rules! make_digest {
                 fn size(&self) -> u32 {
                     <$name>::SIZE
                 }
-                
+
                 #[inline(always)]
                 fn cleanup(self) {}
             }
@@ -162,7 +165,7 @@ macro_rules! make_digest {
     };
 }
 
-/// Represents a key for `HMAC` which has a length greater than or equal to the length of the 
+/// Represents a key for `HMAC` which has a length greater than or equal to the length of the
 /// hash functions digest.
 #[repr(transparent)]
 pub struct KeySlice<'k, SZ: KeySz> {
@@ -192,11 +195,13 @@ impl<'k, SZ: KeySz> GenericKey for KeySlice<'k, SZ> {
 
 impl<'k, SZ: KeySz> KeySlice<'k, SZ> {
     /// Try creating a new `KeySlice` instance.
-    /// 
+    ///
     /// # Errors
-    /// 
-    /// - If the length of the `slice` is less than the [`SZ::size`].
+    ///
+    /// - If the length of the `slice` is less than the [`SZ::size`][1].
     /// - If the length of the `slice` is greater than [`u32::MAX`].
+    ///
+    /// [1]: KeySz::size
     #[inline]
     pub fn new(slice: &'k [u8]) -> Result<Self, InvalidSize> {
         if slice.len() < SZ::size() as usize || !can_cast_u32(slice.len()) {
@@ -209,13 +214,15 @@ impl<'k, SZ: KeySz> KeySlice<'k, SZ> {
 
 impl<'k, SZ: KeySz> TryFrom<&'k [u8]> for KeySlice<'k, SZ> {
     type Error = InvalidSize;
-    
+
     /// Try creating a new `KeySlice` instance.
     ///
     /// # Errors
     ///
-    /// - If the length of the `slice` is less than the [`SZ::size`].
+    /// - If the length of the `slice` is less than the [`SZ::size`][1].
     /// - If the length of the `slice` is greater than [`u32::MAX`].
+    /// 
+    /// [1]: KeySz::size
     #[inline]
     fn try_from(value: &'k [u8]) -> Result<Self, Self::Error> {
         Self::new(value)
