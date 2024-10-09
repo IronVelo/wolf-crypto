@@ -71,7 +71,21 @@ pub trait Hash : Sealed {
     ///
     /// All modern usages of `HMAC`, for example in TLS, use the same key length as the digest
     /// length (`L`).
-    ///
+    /// 
+    /// ## Larger Keys
+    /// 
+    /// As pointed out in [`RFC2104`, section 3 `Keys`][1] the provided key material may be larger
+    /// than the length of the output. This can be done via the [`KeySlice`] type. In general there
+    /// won't be any real advantage to this, however this is with an exception, as stated: 
+    /// 
+    /// ```txt
+    ///    A longer key may be advisable if the randomness of the key is
+    ///    considered weak.
+    /// ```
+    /// 
+    /// Keys larger than the digest / hash output size will be hashed during the initialization of 
+    /// the `HMAC` instance.
+    /// 
     /// [1]: https://www.rfc-editor.org/rfc/rfc2104#section-3
     type KeyLen: KeySz;
 

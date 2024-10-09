@@ -6,14 +6,18 @@ pub mod algo;
 pub use algo::{
     Sha224, Sha256, Sha384, Sha512, 
     Sha3_224, Sha3_256, Sha3_384, Sha3_512,
-    Sha, Md5
+    Sha, Md5,
+
+    KeySlice
 };
 
 use algo::GenericKey;
-
 use crate::ct;
 
-use wolf_crypto_sys::{Hmac as wc_Hmac, wc_HmacSetKey, wc_HmacUpdate, wc_HmacFree, wc_HmacFinal};
+use wolf_crypto_sys::{
+    Hmac as wc_Hmac,
+    wc_HmacSetKey, wc_HmacUpdate, wc_HmacFree, wc_HmacFinal,
+};
 
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
@@ -37,13 +41,13 @@ impl<D: algo::Digest + Copy> Digest<D> {
     }
 
     /// Unwraps this `Digest` returning the raw byte array.
-    /// 
+    ///
     /// # Note
-    /// 
-    /// Comparing `Digest`s should always be in constant-time, do not use `into_inner` prior to 
+    ///
+    /// Comparing `Digest`s should always be in constant-time, do not use `into_inner` prior to
     /// checking equivalence between `Digest`s. The `Digest` type's `PartialEq` implementations
     /// are all in constant-time. Either leverage these, or use this crate's [`ct_eq`] function.
-    /// 
+    ///
     /// [`ct_eq`]: crate::ct_eq
     #[must_use]
     pub const fn into_inner(self) -> D {
@@ -90,10 +94,28 @@ impl<D: algo::Digest, T> PartialEq<&mut T> for Digest<D> where Self: PartialEq<T
     #[inline]
     fn eq(&self, other: &&mut T) -> bool {
         self.eq(other)
-    } 
+    }
 }
 
 /// Hashed-Based Message Authentication Codes `HMAC`.
+///
+/// # Generic `H`
+///
+/// This denotes which hashing function you wish to use under the hood. Options are:
+///
+/// - `Sha224`
+/// - `Sha256`
+/// - `Sha384`
+/// - `Sha512`
+/// - `Sha3_224`
+/// - `Sha3_256`
+/// - `Sha3_384`
+/// - `Sha3_512`
+///
+/// ### Non-FIPS / Legacy
+///
+/// - `Md5`
+/// - `Sha` (`SHA-1`)
 /// 
 /// # Example
 /// 
@@ -124,6 +146,26 @@ pub struct Hmac<H: algo::Hash> {
 
 impl<H: algo::Hash> Hmac<H> {
     /// Create a new `Hmac` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key material to initialize the `Hmac` instance with. This can be the size of
+    ///   the digest or greater (for example, `Sha256` means a 256-bit (32 byte) or larger key).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::hmac::{Hmac, Sha3_512, KeySlice}, MakeOpaque};
+    ///
+    /// // we can provide the exact size of our digest:
+    /// let hmac = Hmac::<Sha3_512>::new([42u8; 64]);
+    ///
+    /// // or we can provide a larger key, however this does not
+    /// // come with much benefit.
+    /// let hmac = KeySlice::new(&[42u8; 128])
+    ///     .opaque_map(Hmac::<Sha3_512>::new)
+    ///     .unwrap();
+    /// ```
     pub fn new<K>(key: K) -> Self
         where K: GenericKey<Size = H::KeyLen>
     {
@@ -199,6 +241,27 @@ impl<H: algo::Hash> Hmac<H> {
     /// # Errors
     ///
     /// If the length of `data` is greater than [`u32::MAX`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::hmac::{Hmac, Sha3_256}, ct_eq};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update("hello world".as_bytes())?;
+    ///
+    /// let out = hmac.finalize();
+    ///
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update("hello world".as_bytes())?;
+    ///
+    /// let other = hmac.finalize();
+    ///
+    /// // Always check in constant-time!! (Digest does this for us)
+    /// assert_eq!(out, other);
+    /// # Ok(()) }
+    /// ```
     pub fn update(&mut self, data: &[u8]) -> Result<&mut Self, Unspecified> {
         if can_cast_u32(data.len()) {
             Ok(unsafe { self.update_unchecked(data) })
@@ -221,6 +284,27 @@ impl<H: algo::Hash> Hmac<H> {
     /// If the length of `data` is greater than [`u32::MAX`].
     ///
     /// [`update`]: Self::update
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::mac::hmac::{Hmac, Sha3_256};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update_sized(b"hello world")?;
+    ///
+    /// // It is generally recommended to use `finalize` instead.
+    /// let mut out = [0u8; 32];
+    /// hmac.finalize_into(&mut out);
+    ///
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update_sized(b"hello world")?;
+    ///
+    /// // Always check in constant-time!!
+    /// assert!(hmac.compare_digest(&out));
+    /// # Ok(()) }
+    /// ```
     pub fn update_sized<const C: usize>(&mut self, data: &[u8; C]) -> Result<&mut Self, Unspecified> {
         if const_can_cast_u32::<C>() {
             Ok(unsafe { self.update_unchecked(data) })
@@ -259,25 +343,80 @@ impl<H: algo::Hash> Hmac<H> {
     /// 
     /// # Arguments
     /// 
-    /// * `output` - The buffer to write the digest to. 
+    /// * `output` - The buffer to write the digest to.
+    ///
+    /// # Note
+    ///
+    /// It is generally recommended to use [`finalize`] in favor of this, as mistakes happen,
+    /// [`finalize`]'s returned [`Digest`] type can help prevent these mistakes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::mac::hmac::{Hmac, Sha3_256};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update(b"hello world")?;
+    ///
+    /// let mut out = [0u8; 32];
+    /// hmac.finalize_into(&mut out);
+    ///
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update(b"hello world")?;
+    ///
+    /// // Always check in constant-time!!
+    /// assert!(hmac.compare_digest(&out));
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`finalize`]: Self::finalize
     #[inline]
     pub fn finalize_into(self, output: &mut H::Digest) {
         unsafe { self.finalize_imp(output.ptr()); }
     }
     
     /// Compute the final hash of the `HMAC` instance's message into the `output` buffer.
-    /// 
-    /// This will write the hash function's associated Digest type's [`size`] result to the `output`
-    /// buffer.
-    /// 
+    ///
     /// # Arguments
     /// 
     /// * `output` - The buffer to write the digest to.
     /// 
     /// # Errors
     /// 
-    /// If the length of `output` is less than the result of [`size`].
-    /// 
+    /// If the length of `output` is less than the result of [`size`] (the digest size) for the
+    /// underlying hashing function.
+    ///
+    /// # Note
+    ///
+    /// It is generally recommended to use [`finalize`] in favor of this, as mistakes happen,
+    /// [`finalize`]'s returned [`Digest`] type can help prevent these mistakes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::hmac::{Hmac, Sha3_256}, ct_eq};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update(b"hello world")?;
+    ///
+    /// let mut out = [0u8; 32];
+    /// hmac.finalize_into_slice(out.as_mut_slice())?;
+    ///
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update(b"hello world")?;
+    ///
+    /// let mut other = [0u8; 32];
+    /// hmac.finalize_into_slice(other.as_mut_slice())?;
+    ///
+    /// // Always check in constant-time!!
+    /// // (either using the Digest type or ct_eq directly)
+    /// assert_eq!(ct_eq(&out, &other), 1);
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`finalize`]: Self::finalize
     /// [`size`]: algo::Digest::size
     pub fn finalize_into_slice(self, output: &mut [u8]) -> Result<(), InvalidSize> {
         if output.len() >= <H::Digest as algo::Digest>::size() as usize {
@@ -292,7 +431,29 @@ impl<H: algo::Hash> Hmac<H> {
     /// 
     /// # Returns
     /// 
-    /// The resulting final digest for the underlying hash function.
+    /// The resulting final digest for the underlying hash function. The type returned ([`Digest`])
+    /// has `PartialEq` utilities which all are in constant-time.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{mac::hmac::{Hmac, Sha3_256}, ct_eq};
+    ///
+    /// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update(b"hello world")?;
+    ///
+    /// let out = hmac.finalize();
+    ///
+    /// let mut hmac = Hmac::<Sha3_256>::new([42; 32]);
+    /// hmac.update(b"hello world")?;
+    ///
+    /// let other = hmac.finalize();
+    ///
+    /// // Always check in constant-time!! (Digest does this for us)
+    /// assert_eq!(out, other);
+    /// # Ok(()) }
+    /// ```
     #[inline]
     pub fn finalize(self) -> Digest<H::Digest> {
         let mut out = <H::Digest as algo::Digest>::zeroes();
@@ -305,10 +466,37 @@ impl<H: algo::Hash> Hmac<H> {
     /// # Arguments
     ///
     /// * `other` - The digest to compare with.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the digests were equivalent, `false` otherwise.
+    ///
+    /// # Note
+    ///
+    /// If you do not have a fixed size buffer of the digest size, see [`compare_digest_slice`]. Or,
+    /// you can use the [`finalize`] method which returns a type who's `PartialEq` implementations
+    /// are all in constant-time.
+    ///
+    /// [`compare_digest_slice`]: Self::compare_digest_slice
+    /// [`finalize`]: Self::finalize
     #[must_use]
-    pub fn compare_digest(self, other: H::Digest) -> bool {
+    pub fn compare_digest(self, other: &H::Digest) -> bool {
         let finalized = self.finalize();
         ct::cmp_slice(finalized.as_ref(), other.as_ref()) != 0
+    }
+
+    /// Ensure that `other` is equivalent to the current message in constant-time.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The digest to compare with.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the digests were equivalent, `false` otherwise.
+    pub fn compare_digest_slice(self, other: &[u8]) -> bool {
+        let finalized = self.finalize();
+        ct::cmp_slice(finalized.as_ref(), other) != 0
     }
 }
 
