@@ -286,13 +286,13 @@ pub unsafe fn cmp_bytes_4_unchecked(mut res: u8, a: &[u8], b: &[u8]) -> u8 {
 /// If the length of slice `a` and slice `b` are not equivalent, this will exit early. In short,
 /// there is variable timing on length comparisons.
 ///
-/// # Warning 
+/// # Warning
 ///
-/// Constant-time programming is nuanced, this implementation provides a *best-effort* 
+/// Constant-time programming is nuanced, this implementation provides a *best-effort*
 /// constant-time equivalence check. While tools for verifying constant time properties over LLVM
-/// bitcode, a great deal of testing, paired with manual review of the output assembly, 
+/// bitcode, a great deal of testing, paired with manual review of the output assembly,
 /// build some degree of confidence, there is still no guarantee of constant-time properties across
-/// all existing hardware. 
+/// all existing hardware.
 ///
 /// # Returns
 ///
@@ -324,15 +324,11 @@ pub fn cmp_slice(a: &[u8], b: &[u8]) -> u8 {
 
         rem = next;
     }
-
-    while rem >= 2 {
-        let next = rem.wrapping_sub(2);
-        unsafe { unroll_ct_cmp!(g2 next, res, a, b) };
-        rem = next;
-    }
-
-    if rem != 0 {
-        res &= unsafe { byte_eq(*a.get_unchecked(0), *b.get_unchecked(0)) }
+    
+    match rem {
+        2 => unsafe { unroll_ct_cmp!(g2 rem.wrapping_sub(2), res, a, b) },
+        1 => unsafe { res &= byte_eq(*a.get_unchecked(0), *b.get_unchecked(0)) },
+        _ => {}
     }
 
     res
