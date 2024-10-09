@@ -506,3 +506,10 @@ impl<H: algo::Hash> Drop for Hmac<H> {
         unsafe { wc_HmacFree(addr_of_mut!(self.inner)); }
     }
 }
+
+// There is no interior mutability or anything of this nature. While raw pointers
+// exist in the underlying struct, they are not ever used under our configuration.
+// These pointers only exist in the underlying hashing functions, which in this crate
+// are also Send + Sync due to our configuration again.
+unsafe impl<H: algo::Hash> Send for Hmac<H> {}
+unsafe impl<H: algo::Hash> Sync for Hmac<H> {}
