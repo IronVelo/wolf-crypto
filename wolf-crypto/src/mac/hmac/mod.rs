@@ -25,6 +25,7 @@ use core::ptr::addr_of_mut;
 use crate::{can_cast_u32, const_can_cast_u32, Unspecified};
 use crate::buf::InvalidSize;
 use crate::mac::hmac::algo::Digest as DigestT;
+use core::fmt;
 
 /// Utility wrapper around the final `HMAC` hash.
 #[must_use]
@@ -32,6 +33,13 @@ use crate::mac::hmac::algo::Digest as DigestT;
 #[derive(Copy, Clone)]
 pub struct Digest<D: algo::Digest> {
     raw: D
+}
+
+impl<D: algo::Digest> fmt::Debug for Digest<D> {
+    /// Writes "Digest { ... }" to the provided formatter.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Digest { ... }")
+    }
 }
 
 impl<D: algo::Digest + Copy> Digest<D> {
