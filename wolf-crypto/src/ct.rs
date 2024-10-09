@@ -326,6 +326,10 @@ pub fn cmp_slice(a: &[u8], b: &[u8]) -> u8 {
     }
     
     match rem {
+        3 => unsafe {
+            res &= byte_eq(*a.get_unchecked(0), *b.get_unchecked(0));
+            unroll_ct_cmp!(g2 rem.wrapping_sub(2), res, a, b);
+        }
         2 => unsafe { unroll_ct_cmp!(g2 rem.wrapping_sub(2), res, a, b) },
         1 => unsafe { res &= byte_eq(*a.get_unchecked(0), *b.get_unchecked(0)) },
         _ => {}
