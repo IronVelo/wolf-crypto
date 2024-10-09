@@ -26,6 +26,13 @@ no_std_io! {
     }
 }
 
+impl From<crate::buf::InvalidSize> for Unspecified {
+    #[inline]
+    fn from(_value: crate::buf::InvalidSize) -> Self {
+        Self
+    }
+}
+
 /// Trait for transforming a `Result<T, E>` into a `Result<T, Unspecified>`.
 ///
 /// This trait is useful in contexts where you want to prevent specific error details from being
