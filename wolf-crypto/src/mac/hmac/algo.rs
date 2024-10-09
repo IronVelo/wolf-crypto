@@ -42,7 +42,7 @@ pub trait GenericKey : Sealed {
 }
 
 /// Represent the output digest of the `HMAC` hash function.
-pub trait Digest : Sealed {
+pub trait Digest : Sealed + AsRef<[u8]> + Copy {
     #[doc(hidden)]
     #[must_use]
     fn zeroes() -> Self;

@@ -2,7 +2,16 @@
 
 pub mod algo;
 
+#[doc(inline)]
+pub use algo::{
+    Sha224, Sha256, Sha384, Sha512, 
+    Sha3_224, Sha3_256, Sha3_384, Sha3_512,
+    Sha, Md5
+};
+
 use algo::GenericKey;
+
+use crate::ct;
 
 use wolf_crypto_sys::{Hmac as wc_Hmac, wc_HmacSetKey, wc_HmacUpdate, wc_HmacFree, wc_HmacFinal};
 
@@ -11,9 +20,102 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use crate::{can_cast_u32, const_can_cast_u32, Unspecified};
 use crate::buf::InvalidSize;
-use crate::mac::hmac::algo::Digest;
+use crate::mac::hmac::algo::Digest as DigestT;
+
+/// Utility wrapper around the final `HMAC` hash.
+#[must_use]
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct Digest<D: algo::Digest> {
+    raw: D
+}
+
+impl<D: algo::Digest + Copy> Digest<D> {
+    /// Create a new `Digest` instance.
+    pub const fn new(digest: D) -> Self {
+        Self { raw: digest }
+    }
+
+    /// Unwraps this `Digest` returning the raw byte array.
+    /// 
+    /// # Note
+    /// 
+    /// Comparing `Digest`s should always be in constant-time, do not use `into_inner` prior to 
+    /// checking equivalence between `Digest`s. The `Digest` type's `PartialEq` implementations
+    /// are all in constant-time. Either leverage these, or use this crate's [`ct_eq`] function.
+    /// 
+    /// [`ct_eq`]: crate::ct_eq
+    #[must_use]
+    pub const fn into_inner(self) -> D {
+        self.raw
+    }
+}
+
+impl<D: algo::Digest> AsRef<[u8]> for Digest<D> {
+    #[inline]
+    fn as_ref(&self) -> &[u8] { self.raw.as_ref() }
+}
+
+impl<D: algo::Digest> AsRef<D> for Digest<D> {
+    #[inline]
+    fn as_ref(&self) -> &D { &self.raw }
+}
+
+impl<D: algo::Digest> PartialEq for Digest<D> {
+    /// Constant-Time Equivalence.
+    fn eq(&self, other: &Self) -> bool {
+        ct::cmp_slice(self.raw.as_ref(), other.raw.as_ref()) != 0
+    }
+}
+
+impl<D: algo::Digest> Eq for Digest<D> {}
+
+impl<D: algo::Digest> PartialEq<[u8]> for Digest<D> {
+    /// Constant-Time Equivalence.
+    fn eq(&self, other: &[u8]) -> bool {
+        ct::cmp_slice(self.raw.as_ref(), other) != 0
+    }
+}
+
+impl<D: algo::Digest, T> PartialEq<&T> for Digest<D> where Self: PartialEq<T> {
+    /// Constant-Time Equivalence.
+    #[inline]
+    fn eq(&self, other: &&T) -> bool {
+        self.eq(other)
+    }
+}
+
+impl<D: algo::Digest, T> PartialEq<&mut T> for Digest<D> where Self: PartialEq<T> {
+    /// Constant-Time Equivalence.
+    #[inline]
+    fn eq(&self, other: &&mut T) -> bool {
+        self.eq(other)
+    } 
+}
 
 /// Hashed-Based Message Authentication Codes `HMAC`.
+/// 
+/// # Example
+/// 
+/// ```
+/// use wolf_crypto::mac::hmac::{Hmac, Sha256};
+/// 
+/// # fn main() -> Result<(), wolf_crypto::Unspecified> {
+/// let mut hmac = Hmac::<Sha256>::new([42u8; 32]);
+/// 
+/// hmac.update(b"hello world, ")?;
+/// hmac.update(b"beautiful weather.")?;
+/// 
+/// let parts = hmac.finalize();
+/// 
+/// let mut hmac = Hmac::<Sha256>::new([42u8; 32]);
+/// 
+/// hmac.update(b"hello world, beautiful weather.")?;
+/// 
+/// let all = hmac.finalize();
+/// 
+/// assert_eq!(parts, all);
+/// # Ok(()) }
 #[repr(transparent)]
 pub struct Hmac<H: algo::Hash> {
     inner: wc_Hmac,
@@ -176,9 +278,9 @@ impl<H: algo::Hash> Hmac<H> {
     /// 
     /// If the length of `output` is less than the result of [`size`].
     /// 
-    /// [`size`]: Digest::size
+    /// [`size`]: algo::Digest::size
     pub fn finalize_into_slice(self, output: &mut [u8]) -> Result<(), InvalidSize> {
-        if output.len() >= <H::Digest as Digest>::size() as usize {
+        if output.len() >= <H::Digest as algo::Digest>::size() as usize {
             unsafe { self.finalize_imp(output.as_mut_ptr()); }
             Ok(())
         } else {
@@ -192,11 +294,21 @@ impl<H: algo::Hash> Hmac<H> {
     /// 
     /// The resulting final digest for the underlying hash function.
     #[inline]
-    #[must_use]
-    pub fn finalize(self) -> H::Digest {
-        let mut out = <H::Digest as Digest>::zeroes();
+    pub fn finalize(self) -> Digest<H::Digest> {
+        let mut out = <H::Digest as algo::Digest>::zeroes();
         unsafe { self.finalize_imp(out.ptr()) };
-        out
+        Digest::new(out)
+    }
+
+    /// Ensure that `other` is equivalent to the current message in constant-time.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The digest to compare with.
+    #[must_use]
+    pub fn compare_digest(self, other: H::Digest) -> bool {
+        let finalized = self.finalize();
+        ct::cmp_slice(finalized.as_ref(), other.as_ref()) != 0
     }
 }
 
