@@ -59,8 +59,9 @@
 #![allow(clippy::result_large_err)]
 // I may just want to be cautious.
 #![allow(clippy::redundant_pub_crate)]
+#![allow(clippy::similar_names)]
+
 #![warn(missing_docs)]
-#![warn(clippy::tabs_in_doc_comments)]
 
 #[cfg(any(test, feature = "alloc"))]
 extern crate alloc;
@@ -89,6 +90,8 @@ non_fips! { // unfortunate
 pub mod aead;
 pub mod mac;
 pub(crate) mod ct;
+
+pub use ct::cmp_slice as ct_eq;
 
 pub use error::Unspecified;
 pub use error::MakeOpaque;
