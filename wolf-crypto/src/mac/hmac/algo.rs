@@ -76,13 +76,13 @@ pub trait Hash : Sealed {
 
     /// The associated key length for `HMAC` with this hashing function.
     ///
-    /// In [`RFC2104`, section 3 `Keys`][1], it states that the key for `HMAC` can be of any length,
+    /// In [`RFC2104`, Section 3 `Keys`][1], it states that the key for `HMAC` can be of any length,
     /// **however** keys less than length `L` (the length of the output (SHA256 being 256 bits)) are
     /// strongly discouraged and considered insecure.
     ///
     /// This library does not support using keys which do not follow this recommendation in the
-    /// safe API. The unsafe API which does expose this is not public yet, and we are decided on
-    /// whether it is worth including in the first place.
+    /// secure API. If you are not able to follow these best practices, see [`InsecureKey`],
+    /// though this is strongly discouraged.
     ///
     /// All modern usages of `HMAC`, for example in TLS, use the same key length as the digest
     /// length (`L`).
@@ -109,9 +109,8 @@ pub trait Hash : Sealed {
     fn type_id() -> core::ffi::c_int;
 }
 
-// Key sizes correspond to the digest size, this is a modern recommendation. In the original
-// RFCs' this was not specified, but nowadays, it is a standard practice. For example in TLS
-// the key size used always corresponds directly to the digest size of the hash function.
+// Key sizes correspond to the digest size pursuant to RFC2104, and all relevant
+// NIST SP recommendations.
 macro_rules! make_digest {
     ($(($name:ident, $sz:literal)),* $(,)?) => {
         $(
@@ -265,6 +264,139 @@ impl<'k, SZ: KeySz> TryFrom<&'k [u8]> for KeySlice<'k, SZ> {
     /// - If the length of the `slice` is greater than [`u32::MAX`].
     /// 
     /// [1]: KeySz::size
+    #[inline]
+    fn try_from(value: &'k [u8]) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+/// Represents a key for `HMAC` which can be **insecure**.
+///
+/// # Security
+///
+/// It is **not recommended** to use this unless you have a very good reason. This reason in general
+/// should be legacy system compatibility, modern systems without this constant
+/// **should not leverage this**, instead, use the [`KeySlice`], or provide the exact key
+/// corresponding to the digest size of the underlying hashing function.
+///
+/// # FIPS Compliance
+///
+/// Using this plays into `FIPS` compliance, **without** this crate's `allow-non-fips` feature
+/// enabled, this **cannot be constructed with a key smaller than the acceptable FIPS standard**
+/// of 14 bytes.
+///
+/// For more information, See [FIPS 198-1, Section 3 Cryptographic Keys][1] reference to
+/// [NIST SP 800-107][2]. Which discusses this minimum security strength of 112 bits (14 bytes) in
+/// [SP 800-107, Section 5.2 Digital Signatures][3] and [SP 800-107 Section 5.3.2 The HMAC Key][4].
+///
+/// [1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.198-1.pdf#%5B%7B%22num%22%3A20%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C0%2C792%2Cnull%5D
+/// [2]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-107r1.pdf
+/// [3]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-107r1.pdf#%5B%7B%22num%22%3A28%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C88%2C463%2C0%5D
+/// [4]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-107r1.pdf#%5B%7B%22num%22%3A35%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C88%2C139%2C0%5D
+#[repr(transparent)]
+pub struct InsecureKey<'k, SZ: KeySz> {
+    inner: &'k [u8],
+    _min_size: PhantomData<SZ>
+}
+
+impl<'k, SZ: KeySz> InsecureKey<'k, SZ> {
+    /// Minimum Size without FIPS requirement (1)
+    #[cfg(feature = "allow-non-fips")]
+    const MIN_SIZE: usize = 1;
+    /// Minimum Size with FIPS requirement (14)
+    #[cfg(not(feature = "allow-non-fips"))]
+    const MIN_SIZE: usize = 14;
+
+    #[inline]
+    #[must_use]
+    const fn new_predicate(len: usize) -> bool {
+        (len >= Self::MIN_SIZE) && can_cast_u32(len)
+    }
+
+    /// Create a new [`InsecureKey`] instance.
+    ///
+    /// # Security
+    ///
+    /// Please read the [`InsecureKey`]'s type documentation regarding security, and why it is
+    /// strongly recommended to use safer, more secure alternatives like [`KeySlice`] or passing
+    /// a key of the underlying hash functions digest length for compile-time checks.
+    ///
+    /// # Errors
+    ///
+    /// This will return `InvalidSize` on conditions dependent on the `allow-non-fips` feature
+    /// flag.
+    ///
+    /// - `allow-non-fips` enabled:
+    ///   This will return `InvalidSize` if the provided key is empty.
+    /// - `allow-non-fips` disabled:
+    ///   Pursuant to the FIPS requirements for HMAC (for more information again read the
+    ///   [`InsecureKey`]'s type documentation), this will return `InvalidSize` if the provided
+    ///   key is shorter than the minimum acceptable FIPS standard of 14 bytes.
+    /// - any configuration:
+    ///   Regardless of the enabled feature flags, if the length of the key is greater than
+    ///   [`u32::MAX`] this will return `InvalidSize`.
+    pub const fn new(slice: &'k [u8]) -> Result<Self, InvalidSize> {
+        if Self::new_predicate(slice.len()) {
+            Ok(Self { inner: slice, _min_size: PhantomData })
+        } else {
+            Err(InvalidSize)
+        }
+    }
+
+    /// THIS MUST NEVER BE EXPOSED OUTSIDE TESTING. THIS IS A REQUIREMENT FOR THE NIST CAVP
+    /// TEST VECTORS, AND SHOULD **NEVER** BE USED OUTSIDE OF THIS OR EXPOSED TO USERS IN ANY
+    /// WAY SHAPE OR FORM.
+    #[cfg(test)]
+    pub const fn nist_cavp_test(slice: &'k [u8]) -> Self {
+        Self { inner: slice, _min_size: PhantomData }
+    }
+}
+
+impl<'k, SZ: KeySz> Sealed for InsecureKey<'k, SZ> {}
+
+impl<'k, SZ: KeySz> GenericKey for InsecureKey<'k, SZ> {
+    type Size = SZ;
+
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        self.inner.as_ptr()
+    }
+
+    #[inline]
+    fn size(&self) -> u32 {
+        // InsecureKey cannot be constructed with a slice which has a length greater than u32::MAX.
+        self.inner.len() as u32
+    }
+
+    #[inline(always)]
+    fn cleanup(self) {}
+}
+
+impl<'k, SZ: KeySz> TryFrom<&'k [u8]> for InsecureKey<'k, SZ> {
+    type Error = InvalidSize;
+
+    /// Create a new [`InsecureKey`] instance.
+    ///
+    /// # Security
+    ///
+    /// Please read the [`InsecureKey`]'s type documentation regarding security, and why it is
+    /// strongly recommended to use safer, more secure alternatives like [`KeySlice`] or passing
+    /// a key of the underlying hash functions digest length for compile-time checks.
+    ///
+    /// # Errors
+    ///
+    /// This will return `InvalidSize` on conditions dependent on the `allow-non-fips` feature
+    /// flag.
+    ///
+    /// - `allow-non-fips` enabled:
+    ///   This will return `InvalidSize` if the provided key is empty.
+    /// - `allow-non-fips` disabled:
+    ///   Pursuant to the FIPS requirements for HMAC (for more information again read the
+    ///   [`InsecureKey`]'s type documentation), this will return `InvalidSize` if the provided
+    ///   key is shorter than the minimum acceptable FIPS standard of 14 bytes.
+    /// - any configuration:
+    ///   Regardless of the enabled feature flags, if the length of the key is greater than
+    ///   [`u32::MAX`] this will return `InvalidSize`.
     #[inline]
     fn try_from(value: &'k [u8]) -> Result<Self, Self::Error> {
         Self::new(value)
