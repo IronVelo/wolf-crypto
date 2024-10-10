@@ -9,6 +9,8 @@ use wolf_crypto_sys::{
 use zeroize::Zeroize;
 
 use crate::sealed::HmacSealed as Sealed;
+use crate::sealed::HmacDigestSealed as SealedDigest;
+
 use crate::buf::InvalidSize;
 use crate::can_cast_u32;
 
@@ -41,8 +43,21 @@ pub trait GenericKey : Sealed {
     fn cleanup(self);
 }
 
-/// Represent the output digest of the `HMAC` hash function.
-pub trait Digest : Sealed + AsRef<[u8]> + Copy {
+/// Represents the hex-encoded output digest of the `HMAC` hash functions.
+pub trait HexDigest : SealedDigest + AsRef<[u8]> + AsMut<[u8]> + Copy {
+    /// The associated hex-decoded digest type.
+    type Digest: Digest;
+
+    #[doc(hidden)]
+    #[must_use]
+    fn zeroes() -> Self;
+}
+
+/// Represents the output digest of the `HMAC` hash function.
+pub trait Digest : Sealed + AsRef<[u8]> + AsMut<[u8]> + Copy {
+    /// The associated hex-encoded digest type.
+    type Hex: HexDigest;
+
     #[doc(hidden)]
     #[must_use]
     fn zeroes() -> Self;
@@ -56,7 +71,7 @@ pub trait Digest : Sealed + AsRef<[u8]> + Copy {
 
 /// The hashing algorithm to use with `HMAC`.
 pub trait Hash : Sealed {
-    #[doc(hidden)]
+    /// Represents the output digest of the hash function.
     type Digest: Digest;
 
     /// The associated key length for `HMAC` with this hashing function.
@@ -100,8 +115,21 @@ pub trait Hash : Sealed {
 macro_rules! make_digest {
     ($(($name:ident, $sz:literal)),* $(,)?) => {
         $(
+            impl SealedDigest for [u8; crate::ct::hex_encode_len($sz)] {}
+            
+            impl HexDigest for [u8; crate::ct::hex_encode_len($sz)] {
+                type Digest = [u8; $sz];
+
+                #[inline]
+                fn zeroes() -> Self {
+                    [0u8; crate::ct::hex_encode_len($sz)]
+                }
+            }
+        
             impl Sealed for [u8; $sz] {}
             impl Digest for [u8; $sz] {
+                type Hex = [u8; crate::ct::hex_encode_len($sz)];
+                
                 #[inline]
                 fn zeroes() -> Self {
                     [0u8; $sz]

@@ -1,6 +1,7 @@
 //! Hashed-Based Message Authentication Codes `HMAC`.
 
 pub mod algo;
+mod digest;
 
 #[doc(inline)]
 pub use algo::{
@@ -24,86 +25,9 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use crate::{can_cast_u32, const_can_cast_u32, Unspecified};
 use crate::buf::InvalidSize;
-use crate::mac::hmac::algo::Digest as DigestT;
-use core::fmt;
+use crate::mac::hmac::algo::Digest as _;
 
-/// Utility wrapper around the final `HMAC` hash.
-#[must_use]
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct Digest<D: algo::Digest> {
-    raw: D
-}
-
-impl<D: algo::Digest> fmt::Debug for Digest<D> {
-    /// Writes "Digest { ... }" to the provided formatter.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Digest { ... }")
-    }
-}
-
-impl<D: algo::Digest + Copy> Digest<D> {
-    /// Create a new `Digest` instance.
-    pub const fn new(digest: D) -> Self {
-        Self { raw: digest }
-    }
-
-    /// Unwraps this `Digest` returning the raw byte array.
-    ///
-    /// # Note
-    ///
-    /// Comparing `Digest`s should always be in constant-time, do not use `into_inner` prior to
-    /// checking equivalence between `Digest`s. The `Digest` type's `PartialEq` implementations
-    /// are all in constant-time. Either leverage these, or use this crate's [`ct_eq`] function.
-    ///
-    /// [`ct_eq`]: crate::ct_eq
-    #[must_use]
-    pub const fn into_inner(self) -> D {
-        self.raw
-    }
-}
-
-impl<D: algo::Digest> AsRef<[u8]> for Digest<D> {
-    #[inline]
-    fn as_ref(&self) -> &[u8] { self.raw.as_ref() }
-}
-
-impl<D: algo::Digest> AsRef<D> for Digest<D> {
-    #[inline]
-    fn as_ref(&self) -> &D { &self.raw }
-}
-
-impl<D: algo::Digest> PartialEq for Digest<D> {
-    /// Constant-Time Equivalence.
-    fn eq(&self, other: &Self) -> bool {
-        ct::cmp_slice(self.raw.as_ref(), other.raw.as_ref()) != 0
-    }
-}
-
-impl<D: algo::Digest> Eq for Digest<D> {}
-
-impl<D: algo::Digest> PartialEq<[u8]> for Digest<D> {
-    /// Constant-Time Equivalence.
-    fn eq(&self, other: &[u8]) -> bool {
-        ct::cmp_slice(self.raw.as_ref(), other) != 0
-    }
-}
-
-impl<D: algo::Digest, T> PartialEq<&T> for Digest<D> where Self: PartialEq<T> {
-    /// Constant-Time Equivalence.
-    #[inline]
-    fn eq(&self, other: &&T) -> bool {
-        self.eq(other)
-    }
-}
-
-impl<D: algo::Digest, T> PartialEq<&mut T> for Digest<D> where Self: PartialEq<T> {
-    /// Constant-Time Equivalence.
-    #[inline]
-    fn eq(&self, other: &&mut T) -> bool {
-        self.eq(other)
-    }
-}
+pub use digest::{Digest, HexDigest};
 
 /// Hashed-Based Message Authentication Codes `HMAC`.
 ///
@@ -502,6 +426,7 @@ impl<H: algo::Hash> Hmac<H> {
     /// # Returns
     ///
     /// `true` if the digests were equivalent, `false` otherwise.
+    #[must_use]
     pub fn compare_digest_slice(self, other: &[u8]) -> bool {
         let finalized = self.finalize();
         ct::cmp_slice(finalized.as_ref(), other) != 0
@@ -521,3 +446,395 @@ impl<H: algo::Hash> Drop for Hmac<H> {
 // are also Send + Sync due to our configuration again.
 unsafe impl<H: algo::Hash> Send for Hmac<H> {}
 unsafe impl<H: algo::Hash> Sync for Hmac<H> {}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use hmac::{Hmac as rc_Hmac, Mac as _};
+    use proptest::prelude::*;
+    use crate::aes::test_utils::{BoundList, AnyList};
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(5_000))]
+
+        #[test]
+        fn rust_crypto_equivalence_sha256(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 32]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha256>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha256>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha256(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 32]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha256>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha256>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha224(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 28]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha224>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha224>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha224(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 28]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha224>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha224>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha384(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 48]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha384>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha384>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha384(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 48]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha384>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha384>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha512(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 64]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha512>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha512>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha512(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 64]>()
+        ) {
+            let mut rc = rc_Hmac::<sha2::Sha512>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha512>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha3_256(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 32]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_256>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_256>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha3_256(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 32]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_256>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_256>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha3_224(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 28]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_224>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_224>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha3_224(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 28]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_224>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_224>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha3_384(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 48]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_384>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_384>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha3_384(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 48]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_384>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_384>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha3_512(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 64]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_512>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_512>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha3_512(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 64]>()
+        ) {
+            let mut rc = rc_Hmac::<sha3::Sha3_512>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha3_512>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_sha1(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 20]>()
+        ) {
+            let mut rc = rc_Hmac::<sha1::Sha1>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_sha1(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 20]>()
+        ) {
+            let mut rc = rc_Hmac::<sha1::Sha1>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Sha>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_md5(
+            input in any::<BoundList<1024>>(),
+            key in any::<[u8; 16]>()
+        ) {
+            let mut rc = rc_Hmac::<md5::Md5>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Md5>::new(&key);
+
+            rc.update(input.as_slice());
+            wc.update(input.as_slice()).unwrap();
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+
+        #[test]
+        fn rust_crypto_equivalence_many_updates_md5(
+            input in any::<AnyList<32, BoundList<256>>>(),
+            key in any::<[u8; 16]>()
+        ) {
+            let mut rc = rc_Hmac::<md5::Md5>::new_from_slice(key.as_slice())
+                .unwrap();
+
+            let mut wc = Hmac::<Md5>::new(&key);
+
+            for data in input.as_slice() {
+                rc.update(data.as_slice());
+                wc.update(data.as_slice()).unwrap();
+            }
+
+            let rc_out = rc.finalize().into_bytes();
+
+            prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
+        }
+    }
+}
