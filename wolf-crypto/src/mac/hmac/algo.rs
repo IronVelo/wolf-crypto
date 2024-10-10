@@ -208,7 +208,7 @@ macro_rules! make_digest {
 }
 
 /// Represents a key for `HMAC` which has a length greater than or equal to the length of the
-/// hash functions digest.
+/// hash function's digest.
 #[repr(transparent)]
 pub struct KeySlice<'k, SZ: KeySz> {
     inner: &'k [u8],
