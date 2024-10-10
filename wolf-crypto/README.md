@@ -1,31 +1,31 @@
 
 # Table of Contents
 
-1.  [`wolf-crypto`](#org74c94c3)
-2.  [Testing](#org74608c7)
-    1.  [Current Test Suite](#org16ca46c)
-        1.  [Unit Tests](#org2f84723)
-        2.  [Property Tests](#org13972f6)
-        3.  [NIST CSRC CAVP Tests](#orgbac4673)
-        4.  [Official KATs (Known Answer Tests)](#org99153cb)
-    2.  [Goals and Approach](#orgec07d0f)
-    3.  [Comparison with `wolfcrypt`](#org87c5546)
-    4.  [Formal Verification Considerations](#org135d1ea)
-        1.  [Current Tools and Limitations](#orgad4ad41)
-        2.  [Future Prospects](#org2f5aca0)
-        3.  [Important Note on Limitations](#org0f6c7af)
-    5.  [Future Enhancements](#org6ea503a)
-        1.  [Constant-time Behavior Testing](#org5f1376e)
-        2.  [Expanded Test Coverage](#orge909f73)
-3.  [Current Priorities](#orgfd5c194)
-4.  [License](#orgd224b6a)
-5.  [Notes](#orgb17186e)
-6.  [Roadmap <code>[1/5]</code>](#org2a6bf40)
+1.  [`wolf-crypto`](#org75e2028)
+2.  [Testing](#org5d86535)
+    1.  [Current Test Suite](#org0df81b2)
+        1.  [Unit Tests](#org1a6155a)
+        2.  [Property Tests](#org4ac94b0)
+        3.  [NIST CSRC CAVP Tests](#org6dbcc4d)
+        4.  [Official KATs (Known Answer Tests)](#org8a46e64)
+    2.  [Goals and Approach](#org6c7c166)
+    3.  [Comparison with `wolfcrypt`](#orgec53e72)
+    4.  [Formal Verification Considerations](#org8d7ef98)
+        1.  [Current Tools and Limitations](#orge25c493)
+        2.  [Future Prospects](#org2342df5)
+        3.  [Important Note on Limitations](#org0f73e5f)
+    5.  [Future Enhancements](#org3f1514d)
+        1.  [Constant-time Behavior Testing](#org7d96372)
+        2.  [Expanded Test Coverage](#orgb7955eb)
+3.  [Current Priorities](#org73933c9)
+4.  [License](#org6ca1e62)
+5.  [Notes](#orgdda3da1)
+6.  [Roadmap <code>[2/5]</code>](#org6f42f16)
 
 **WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.**
 
 
-<a id="org74c94c3"></a>
+<a id="org75e2028"></a>
 
 # `wolf-crypto`
 
@@ -40,7 +40,7 @@ I personally would not be comfortable using anything in a general purpose applic
 work in security).
 
 
-<a id="org74608c7"></a>
+<a id="org5d86535"></a>
 
 # Testing
 
@@ -48,12 +48,12 @@ Despite not implementing cryptography by hand, this library deals with cryptogra
 Consequently, comprehensive testing is crucial. Although still in alpha, we maintain an extensive test suite:
 
 
-<a id="org16ca46c"></a>
+<a id="org0df81b2"></a>
 
 ## Current Test Suite
 
 
-<a id="org2f84723"></a>
+<a id="org1a6155a"></a>
 
 ### Unit Tests
 
@@ -61,7 +61,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Ensure behavior equivalent to robust implementations (e.g., `rust-crypto`) under these edge cases.
 
 
-<a id="org13972f6"></a>
+<a id="org4ac94b0"></a>
 
 ### Property Tests
 
@@ -70,7 +70,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Compare against robust implementations for equivalence.
 
 
-<a id="orgbac4673"></a>
+<a id="org6dbcc4d"></a>
 
 ### NIST CSRC CAVP Tests
 
@@ -80,7 +80,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
     -   Known Answer tests (short and long datasets).
 
 
-<a id="org99153cb"></a>
+<a id="org8a46e64"></a>
 
 ### Official KATs (Known Answer Tests)
 
@@ -88,7 +88,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Example: BLAKE2 algorithm.
 
 
-<a id="orgec07d0f"></a>
+<a id="org6c7c166"></a>
 
 ## Goals and Approach
 
@@ -98,7 +98,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Enforce secure programming practices (e.g., prompt zeroing of secrets from memory).
 
 
-<a id="org87c5546"></a>
+<a id="orgec53e72"></a>
 
 ## Comparison with `wolfcrypt`
 
@@ -108,7 +108,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Build confidence through equivalence testing with other Rust cryptography projects.
 
 
-<a id="org135d1ea"></a>
+<a id="org8d7ef98"></a>
 
 ## Formal Verification Considerations
 
@@ -117,7 +117,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Attempting to formally verify our API would have minimal benefits due to necessary assumptions about `wolfcrypt`.
 
 
-<a id="orgad4ad41"></a>
+<a id="orge25c493"></a>
 
 ### Current Tools and Limitations
 
@@ -144,7 +144,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
     -   Some `proofs` using `Kani` are included, anticipating future improvements in FFI support.
 
 
-<a id="org2f5aca0"></a>
+<a id="org2342df5"></a>
 
 ### Future Prospects
 
@@ -153,7 +153,7 @@ Consequently, comprehensive testing is crucial. Although still in alpha, we main
 -   Continuous monitoring of advancements in formal verification for Rust.
 
 
-<a id="org0f6c7af"></a>
+<a id="org0f73e5f"></a>
 
 ### Important Note on Limitations
 
@@ -162,12 +162,12 @@ as `wolfcrypt`, the underlying cryptographic module, is not formally verified. T
 require formal verification of both our API and the underlying `wolfcrypt` implementation.
 
 
-<a id="org6ea503a"></a>
+<a id="org3f1514d"></a>
 
 ## Future Enhancements
 
 
-<a id="org5f1376e"></a>
+<a id="org7d96372"></a>
 
 ### Constant-time Behavior Testing
 
@@ -180,8 +180,11 @@ require formal verification of both our API and the underlying `wolfcrypt` imple
     -   High-level taint analysis (challenging across FFI).
 -   Importance: Preventing information leakage.
 
+It is important to note that all of the `ct` module has undergone rigorous analysis and verification of
+the documented constant-time properties. 
 
-<a id="orge909f73"></a>
+
+<a id="orgb7955eb"></a>
 
 ### Expanded Test Coverage
 
@@ -189,7 +192,7 @@ require formal verification of both our API and the underlying `wolfcrypt` imple
 -   Implement more sophisticated constant-time behavior tests when feasible.
 
 
-<a id="orgfd5c194"></a>
+<a id="org73933c9"></a>
 
 # Current Priorities
 
@@ -199,14 +202,14 @@ require formal verification of both our API and the underlying `wolfcrypt` imple
 -   Enable `FIPS-MODE` support in `wolf-crypto-sys` to align with the FIPS compliance goals.
 
 
-<a id="orgd224b6a"></a>
+<a id="org6ca1e62"></a>
 
 # License
 
 This library is under GPLv2 licensing **unless** you purchased a commercial license from wolfSSL.
 
 
-<a id="orgb17186e"></a>
+<a id="orgdda3da1"></a>
 
 # Notes
 
@@ -214,9 +217,9 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
 -   Why is this named `wolf-crypto` and not `wolfcrypt`: I did not want to take the official name by wolfSSL.
 
 
-<a id="org2a6bf40"></a>
+<a id="org6f42f16"></a>
 
-# Roadmap <code>[1/5]</code>
+# Roadmap <code>[2/5]</code>
 
 -   [X] Hashing <code>[6/6]</code>
     -   [X] SHA2 <code>[6/6]</code>
@@ -248,8 +251,9 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
         -   [X] 256
         -   [X] 192
         -   [X] 128
-    -   [X] ChaCha20-Poly1305 <code>[1/1]</code>
+    -   [X] ChaCha20-Poly1305 <code>[2/2]</code>
         -   [X] 256
+        -   [X] 128
     -   [ ] AES-CCM <code>[0/3]</code>
         -   [ ] 256
         -   [ ] 192
@@ -286,17 +290,17 @@ This library is under GPLv2 licensing **unless** you purchased a commercial lice
     -   [ ] 3DES <code>[0/1]</code>
         -   [ ] 168
 
--   [-] MAC <code>[1/2]</code>
-    -   [ ] HMAC <code>[0/9]</code>
-        -   [ ] SHA-256
-        -   [ ] SHA-384
-        -   [ ] SHA-512
-        -   [ ] SHA3-224
-        -   [ ] SHA3-256
-        -   [ ] SHA3-384
-        -   [ ] SHA3-512
-        -   [ ] SHA
-        -   [ ] MD5
+-   [X] MAC <code>[2/2]</code>
+    -   [X] HMAC <code>[9/9]</code>
+        -   [X] SHA-256
+        -   [X] SHA-384
+        -   [X] SHA-512
+        -   [X] SHA3-224
+        -   [X] SHA3-256
+        -   [X] SHA3-384
+        -   [X] SHA3-512
+        -   [X] SHA
+        -   [X] MD5
     -   [X] Poly1305 <code>[1/1]</code>
         -   [X] Poly1305
 

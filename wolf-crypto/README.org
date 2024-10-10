@@ -111,6 +111,9 @@ require formal verification of both our API and the underlying =wolfcrypt= imple
   - High-level taint analysis (challenging across FFI).
 - Importance: Preventing information leakage.
 
+It is important to note that all of the =ct= module has undergone rigorous analysis and verification of
+the documented constant-time properties. 
+
 *** Expanded Test Coverage
 
 - Focus on security properties beyond traditional code coverage.
@@ -132,7 +135,7 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
 - Affiliation: I am not affiliated with wolfSSL, I just enjoy security and have appreciation for their work.
 - Why is this named =wolf-crypto= and not =wolfcrypt=: I did not want to take the official name by wolfSSL.
 
-* Roadmap [1/5]
+* Roadmap [2/5]
 
 - [X] Hashing [6/6]
   - [X] SHA2 [6/6]
@@ -160,14 +163,14 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
     - [X] BLAKE2b
     - [X] BLAKE2s
 
-- [-] AEAD [1/5]
+- [-] AEAD [2/5]
   - [X] AES-GCM [3/3]
     - [X] 256
     - [X] 192
     - [X] 128
-  - [ ] ChaCha20-Poly1305 [0/2]
-    - [ ] 256
-    - [ ] 128
+  - [X] ChaCha20-Poly1305 [2/2]
+    - [X] 256
+    - [X] 128
   - [ ] AES-CCM [0/3]
     - [ ] 256
     - [ ] 192
@@ -205,18 +208,19 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
     - [ ] 168
       # DES is supported by wolfcrypt, but again, I will not support it unless explicitly asked.
 
-- [-] MAC [1/2]
-  - [ ] HMAC [0/9]
-    - [ ] SHA-256
-    - [ ] SHA-384
-    - [ ] SHA-512
-    - [ ] SHA3-224
-    - [ ] SHA3-256
-    - [ ] SHA3-384
-    - [ ] SHA3-512
-    - [ ] SHA
-    - [ ] MD5
+- [X] MAC [2/2]
+  - [X] HMAC [9/9]
+    - [X] SHA-256
+    - [X] SHA-384
+    - [X] SHA-512
+    - [X] SHA3-224
+    - [X] SHA3-256
+    - [X] SHA3-384
+    - [X] SHA3-512
+    - [X] SHA
+    - [X] MD5 
   - [X] Poly1305 [1/1]
     - [X] Poly1305
 
 - [ ] Writing the Remaining Sections (asymmetric, password, padding, etc)
+
