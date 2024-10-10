@@ -2,6 +2,7 @@
 use zeroize::Zeroize;
 use core::convert::TryFrom;
 use crate::can_cast_u32;
+use core::fmt;
 
 /// A trait for types that represent initialization vector (IV) sizes.
 ///
@@ -68,9 +69,19 @@ pub trait GenericIv {
     fn as_slice(&self) -> &[u8];
 }
 
-/// An error type indicating an invalid size when converting to an IV type.
+/// Error returned when the provided slice is not the expected length.
 #[derive(Debug)]
 pub struct InvalidSize;
+
+impl fmt::Display for InvalidSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("InvalidSize")
+    }
+}
+
+std! {
+    impl std::error::Error for InvalidSize {}
+}
 
 macro_rules! def_nonce {
     ($ident:ident, $size:ident) => {

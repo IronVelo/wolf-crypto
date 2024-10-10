@@ -542,7 +542,7 @@ mod property_tests {
 
         #[test]
         fn self_bijective(
-            input in any::<BoundList<1028>>(),
+            input in any::<BoundList<1024>>(),
             key in any::<Key>(),
             nonce in any::<Iv>()
         ) {
@@ -570,7 +570,7 @@ mod property_tests {
 
         #[test]
         fn from_ctr_crate_to_wolf(
-            input in any::<BoundList<1028>>(),
+            input in any::<BoundList<1024>>(),
             key in any::<Key>(),
             nonce in any::<Iv>()
         ) {
@@ -589,7 +589,7 @@ mod property_tests {
 
         #[test]
         fn from_wolf_to_ctr_crate(
-            input in any::<BoundList<1028>>(),
+            input in any::<BoundList<1024>>(),
             key in any::<Key>(),
             nonce in any::<Iv>()
         ) {

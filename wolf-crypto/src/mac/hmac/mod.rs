@@ -420,7 +420,7 @@ impl<H: algo::Hash> Hmac<H> {
     ///
     /// // Always check in constant-time!!
     /// // (either using the Digest type or ct_eq directly)
-    /// assert_eq!(ct_eq(&out, &other), 1);
+    /// assert!(ct_eq(&out, &other));
     /// # Ok(()) }
     /// ```
     ///

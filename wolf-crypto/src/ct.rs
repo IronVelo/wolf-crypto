@@ -515,13 +515,13 @@ fn encode_byte(byte: u8, output: &mut [u8]) {
 ///
 /// 1. Single Byte Encoding:
 ///    The `encode_byte_is_always_utf8` proof verifies that for any input byte, the output of
-///    encode_byte is always valid hexadecimal (and thus valid UTF-8).
+///    `encode_byte` is always valid hexadecimal (and thus valid UTF-8).
 ///
 /// 2. Inductive Step:
 ///    - The `verify_encode_n_plus_1_bytes_symbolic` proof demonstrates that if encoding n bytes
 ///      produces valid UTF-8, encoding an additional byte preserves this property.
 ///    - The `verify_hex_encode_inductive_step_symbolic` proof applies this principle to the
-///      hex_encode function itself, verifying that the UTF-8 validity is maintained for
+///      `encode_into` function itself, verifying that the UTF-8 validity is maintained for
 ///      arbitrary input lengths.
 ///
 /// [`encode_str`]: crate::hex::encode_str
@@ -757,6 +757,17 @@ alloc! {
     /// # Returns
     ///
     /// The decoded bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::{hex, ct_eq};
+    ///
+    /// let encoded = hex::encode(b"hello world");
+    /// let decoded = hex::decode(encoded.as_bytes()).unwrap();
+    ///
+    /// assert!(ct_eq(b"hello world", decoded));
+    /// ```
     pub fn hex_decode_alloc(input: &[u8]) -> Result<Vec<u8>, HexError> {
         let mut output = vec![0u8; input.len() >> 1];
         hex_decode(input, output.as_mut_slice()).map(move |_| output)

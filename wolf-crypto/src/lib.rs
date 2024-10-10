@@ -68,6 +68,7 @@ extern crate alloc;
 
 #[cfg(test)]
 extern crate std;
+extern crate core;
 
 #[macro_use]
 mod macros;
@@ -91,7 +92,22 @@ pub mod aead;
 pub mod mac;
 pub(crate) mod ct;
 
-pub use ct::cmp_slice as ct_eq;
+pub use ct::ct_eq;
+
+pub mod hex {
+    //! Constant-Time Hex Encoding and Decoding
+
+    pub use super::ct::HexError;
+
+    pub use super::ct::hex_encode as encode_into;
+    pub use super::ct::hex_encode_str as encode_str;
+    pub use super::ct::hex_decode as decode_into;
+
+    alloc! {
+        pub use super::ct::hex_encode_alloc as encode;
+        pub use super::ct::hex_decode_alloc as decode;
+    }
+}
 
 pub use error::Unspecified;
 pub use error::MakeOpaque;

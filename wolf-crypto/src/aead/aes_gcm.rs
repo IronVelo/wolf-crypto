@@ -718,11 +718,11 @@ mod property_tests {
 
         #[test]
         fn self_bijectivity(
-            input in any::<BoundList<1028>>(),
+            input in any::<BoundList<1024>>(),
             key in any::<Key>(),
             nonce in any::<Nonce>()
         ) {
-            let mut output = BoundList::<1028>::new_zeroes(input.len());
+            let mut output = BoundList::<1024>::new_zeroes(input.len());
 
             let mut aes = AesGcm::new(&key).unwrap();
             let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), AadSlice::EMPTY);
@@ -733,7 +733,7 @@ mod property_tests {
                 prop_assert_ne!(input, output);
             }
 
-            let mut plain = BoundList::<1028>::new_zeroes(input.len());
+            let mut plain = BoundList::<1024>::new_zeroes(input.len());
             aes.decrypt(nonce.copy(), output.as_slice(), plain.as_mut_slice(), AadSlice::EMPTY, &tag);
 
             prop_assert_eq!(plain.as_slice(), input.as_slice());
@@ -746,13 +746,13 @@ mod property_tests {
 
         #[test]
         fn rust_crypto_to_wolf(
-            input in any::<BoundList<1028>>(),
+            input in any::<BoundList<1024>>(),
             key in any::<Key>(),
             nonce in any::<Nonce>()
         ) {
             let (cipher, tag) = encrypt_rust_crypto(&key, nonce.copy(), input.as_slice());
 
-            let mut plain = BoundList::<1028>::new_zeroes(input.len());
+            let mut plain = BoundList::<1024>::new_zeroes(input.len());
             AesGcm::new(&key).unwrap()
                 .decrypt(nonce, cipher.as_slice(), plain.as_mut_slice(), AadSlice::EMPTY, &tag);
 
@@ -761,11 +761,11 @@ mod property_tests {
 
         #[test]
         fn wolf_to_rust_crypto(
-            input in any::<BoundList<1028>>(),
+            input in any::<BoundList<1024>>(),
             key in any::<Key>(),
             nonce in any::<Nonce>()
         ) {
-            let mut output = BoundList::<1028>::new_zeroes(input.len());
+            let mut output = BoundList::<1024>::new_zeroes(input.len());
 
             let mut aes = AesGcm::new(&key).unwrap();
             let tag = aes.encrypt(nonce.copy(), input.as_slice(), output.as_mut_slice(), AadSlice::EMPTY);
@@ -794,8 +794,8 @@ mod property_tests {
 //
 //     #[proof]
 //     fn self_bijectivity() {
-//         let input: BoundList<1028> = kani::any();
-//         let mut output = BoundList::<1028>::new_zeroes(input.len());
+//         let input: BoundList<1024> = kani::any();
+//         let mut output = BoundList::<1024>::new_zeroes(input.len());
 //
 //         let key: Key = kani::any();
 //         let nonce: Nonce = kani::any();
@@ -805,7 +805,7 @@ mod property_tests {
 //
 //         assert_ne!(input, output);
 //
-//         let mut plain = BoundList::<1028>::new_zeroes(input.len());
+//         let mut plain = BoundList::<1024>::new_zeroes(input.len());
 //         aes.decrypt(nonce.copy(), output.as_slice(), plain.as_mut_slice(), Aad::EMPTY, &tag);
 //
 //         assert_eq!(plain, input);

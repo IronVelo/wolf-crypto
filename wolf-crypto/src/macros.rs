@@ -166,7 +166,7 @@ macro_rules! arb_key {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, check, kani))]
 macro_rules! logic {
     (($premise:expr) ==> ($conclusion:expr)) => {
         !($premise) || $conclusion
@@ -179,7 +179,7 @@ macro_rules! logic {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, check, kani))]
 /// Basic macro just so that I can think more clearly about my assertions with infix notation.
 macro_rules! ensure {
     // implications
