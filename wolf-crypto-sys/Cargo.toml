@@ -1,9 +1,9 @@
 [package]
 name = "wolf-crypto-sys"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2021"
 license = "GPL-2.0-only"
-categories = ["no-std", "cryptography"]
+categories = ["no-std", "no-std::no-alloc", "cryptography"]
 keywords = ["sha2", "sha3", "aes", "crypto", "digest"]
 authors = ["Clelland Green <cg@ironvelo.com>"]
 repository = "https://github.com/CleveGreen/wolf-crypto"
