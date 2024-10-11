@@ -52,7 +52,7 @@ fn hkdf_predicate<S: Salt<Empty>, A: Additional>(s: &S, a: &A) -> bool {
     s.is_valid_size() && a.is_valid_size()
 }
 
-/// Performs `HKDF` and returns the result as a fixed-size array.
+/// Performs HKDF and returns the result as a fixed-size array.
 ///
 /// # Arguments
 ///
