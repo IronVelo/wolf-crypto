@@ -91,6 +91,7 @@ non_fips! { // unfortunate
 pub mod aead;
 pub mod mac;
 pub(crate) mod ct;
+pub mod kdf;
 
 pub use ct::ct_eq;
 
@@ -128,6 +129,7 @@ pub(crate) const fn const_lte<const L: usize, const MAX: u32>() -> bool {
     L <= (MAX as usize)
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(dead_code))]
 #[must_use]
 pub(crate) const fn const_gte<const L: usize, const MIN: usize>() -> bool {
     L >= MIN
@@ -140,6 +142,7 @@ pub(crate) const fn lte<const MAX: usize>(value: usize) -> bool {
     value <= MAX
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(dead_code))]
 #[inline]
 #[must_use]
 pub(crate) const fn gte<const MIN: usize>(value: usize) -> bool {
