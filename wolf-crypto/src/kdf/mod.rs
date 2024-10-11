@@ -91,6 +91,17 @@ impl Iters {
         Self { count: NonZeroU32::new_unchecked(iters) }
     }
 
+    /// Returns `true` if the iteration count can safely be cast to an `i32`.
+    ///
+    /// Certain KDFs (such as the PBKDF family) take the iteration count as an `i32`, and check
+    /// at runtime if the iteration count is greater than 0. This most likely is an older design
+    /// choice which they must keep for stability reasons.
+    ///
+    /// For ergonomic reasons, we will represent the iteration count as an unsigned int.
+    pub const fn is_valid_size(&self) -> bool {
+        self.get() <= i32::MAX as u32
+    }
+
     /// Returns the contained iteration count as a `u32`.
     #[inline]
     #[must_use]

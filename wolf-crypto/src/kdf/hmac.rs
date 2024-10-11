@@ -8,7 +8,7 @@
 use wolf_crypto_sys::{wc_HKDF};
 use crate::aead::Aad as Additional;
 use crate::{can_cast_u32, const_can_cast_u32, Unspecified};
-use crate::kdf::Salt;
+use crate::kdf::{Salt, salt::Empty};
 
 use crate::mac::hmac::algo::{GenericKey, Hash};
 
@@ -21,7 +21,7 @@ use crate::mac::hmac::algo::{GenericKey, Hash};
 #[inline]
 unsafe fn hkdf_unchecked<H: Hash>(
     key: impl GenericKey<Size = H::KeyLen>,
-    salt: impl Salt,
+    salt: impl Salt<Empty>,
     additional: impl Additional,
     into: &mut [u8]
 ) {
@@ -48,7 +48,7 @@ unsafe fn hkdf_unchecked<H: Hash>(
 /// Checks if the salt and additional data have valid sizes.
 #[inline]
 #[must_use]
-fn hkdf_predicate<S: Salt, A: Additional>(s: &S, a: &A) -> bool {
+fn hkdf_predicate<S: Salt<Empty>, A: Additional>(s: &S, a: &A) -> bool {
     s.is_valid_size() && a.is_valid_size()
 }
 
@@ -85,7 +85,7 @@ fn hkdf_predicate<S: Salt, A: Additional>(s: &S, a: &A) -> bool {
 #[inline]
 pub fn hkdf<H: Hash, const KL: usize>(
     key: impl GenericKey<Size = H::KeyLen>,
-    salt: impl Salt,
+    salt: impl Salt<Empty>,
     additional: impl Additional,
 ) -> Result<[u8; KL], Unspecified> {
     if hkdf_predicate(&salt, &additional) && const_can_cast_u32::<KL>() {
@@ -127,7 +127,7 @@ pub fn hkdf<H: Hash, const KL: usize>(
 #[inline]
 pub fn hkdf_into<H: Hash>(
     key: impl GenericKey<Size = H::KeyLen>,
-    salt: impl Salt,
+    salt: impl Salt<Empty>,
     additional: impl Additional,
     output: &mut [u8]
 ) -> Result<(), Unspecified> {
