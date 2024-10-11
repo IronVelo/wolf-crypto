@@ -1,7 +1,5 @@
 //! Key Derivation Functions
 
-pub mod pbkdf2;
-
 use crate::{can_cast_i32, can_cast_u32, const_can_cast_i32, const_can_cast_u32, to_u32};
 use crate::sealed::AadSealed as Sealed;
 use core::num::NonZeroU32;
@@ -9,11 +7,21 @@ use core::marker::PhantomData;
 use core::convert::Infallible;
 use crate::buf::InvalidSize;
 use crate::error::InvalidIters;
+use core::fmt;
 
 non_fips! {
     mod hmac;
     pub use hmac::hkdf;
     pub use hmac::hkdf_into;
+}
+
+pub mod pbkdf;
+#[doc(inline)]
+pub use pbkdf::{pbkdf2, pbkdf2_into};
+
+non_fips! {
+    #[doc(inline)]
+    pub use pbkdf::{pbkdf1, pbkdf1_into};
 }
 
 #[doc(inline)]
@@ -44,8 +52,22 @@ non_fips! {
 ///
 /// [1]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-132.pdf#%5B%7B%22num%22%3A18%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C0%2C316%2Cnull%5D
 /// [2]: https://csrc.nist.gov/News/2023/decision-to-revise-nist-sp-800-132
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Iters { count: NonZeroU32 }
+
+impl fmt::Display for Iters {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("Iters({})", self.count))
+    }
+}
+
+impl fmt::Debug for Iters {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <Self as fmt::Display>::fmt(self, f)
+    }
+}
 
 impl Iters {
     /// Create a new `Iters` instance.
