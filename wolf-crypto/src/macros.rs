@@ -57,6 +57,7 @@ macro_rules! no_std_io {
     }
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(unused_macros))]
 macro_rules! io_impls {
     ($($item:item)*) => {
         $(
@@ -67,6 +68,7 @@ macro_rules! io_impls {
     };
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(unused_macros))]
 macro_rules! opaque_dbg {
     ($struct:ident $(<$lt:lifetime>)?) => {
         impl $(<$lt>)? ::core::fmt::Debug for $struct $(<$lt>)? {
@@ -87,6 +89,7 @@ macro_rules! opaque_dbg {
     }
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(unused_macros))]
 macro_rules! into_result {
     ($res:expr, ok => $ok:expr, err => $err:expr) => {
         if $res.is_ok() {
@@ -97,6 +100,7 @@ macro_rules! into_result {
     };
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(unused_macros))]
 macro_rules! define_state {
     (
         $(#[$meta:meta])*
@@ -122,6 +126,7 @@ macro_rules! define_state {
     };
 }
 
+#[cfg_attr(not(feature = "allow-non-fips"), allow(unused_macros))]
 macro_rules! arb_key {
     (struct $ident:ident :: $construct:ident ([u8; $sz:literal])) => {
         #[cfg(test)]

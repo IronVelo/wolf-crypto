@@ -148,6 +148,7 @@ const fn mask_add(left: u32, right: u32, mask: u32) -> u32 {
 /// ```
 #[cfg_attr(not(llvm_ir_check), inline)]
 #[cfg_attr(llvm_ir_check, no_mangle)]
+#[cfg_attr(not(feature = "allow-non-fips"), allow(dead_code))]
 pub fn add_no_wrap(a: u32, b: u32) -> (u32, Res) {
     let overflow = gt(b, u32::MAX.wrapping_sub(a));
 
