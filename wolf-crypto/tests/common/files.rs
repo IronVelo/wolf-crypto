@@ -185,3 +185,7 @@ ingest_paths! { pub SHA512_256_BYTE_FILES => "sha-bytes/shabytetestvectors",
     SHA512_256ShortMsg.rsp
     SHA512_256LongMsg.rsp
 }
+
+ingest_paths! { pub HMACVS_FILES => "hmac",
+    HMAC.rsp
+}

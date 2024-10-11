@@ -342,14 +342,6 @@ impl<'k, SZ: KeySz> InsecureKey<'k, SZ> {
             Err(InvalidSize)
         }
     }
-
-    /// THIS MUST NEVER BE EXPOSED OUTSIDE TESTING. THIS IS A REQUIREMENT FOR THE NIST CAVP
-    /// TEST VECTORS, AND SHOULD **NEVER** BE USED OUTSIDE OF THIS OR EXPOSED TO USERS IN ANY
-    /// WAY SHAPE OR FORM.
-    #[cfg(test)]
-    pub const fn nist_cavp_test(slice: &'k [u8]) -> Self {
-        Self { inner: slice, _min_size: PhantomData }
-    }
 }
 
 impl<'k, SZ: KeySz> Sealed for InsecureKey<'k, SZ> {}

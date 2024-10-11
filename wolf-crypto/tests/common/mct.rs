@@ -12,7 +12,7 @@ impl<'t> MonteTest<'t> {
 
     /// Returns seed (first elem), and the actual test
     pub fn start(self) -> (&'t [u8], ActiveMonte<'t>) {
-        let (seed, rem) = parse_assign(b"Seed")(self.inner)
+        let (seed, rem) = parse_assign(b"Seed")(take_ignorable(self.inner))
             .expect("Failed to find Seed for Monte Test");
         let rem = take_ignorable(rem);
 

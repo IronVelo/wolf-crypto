@@ -1,18 +1,19 @@
 
 # Table of Contents
 
-1.  [NIST MCT and KATs](#orge090024)
-    1.  [Introduction](#orgcf7bdaa)
-    2.  [Current State](#org2ccc43e)
-    3.  [Requirements To Run Tests](#org596eab8)
+1.  [NIST MCT and KATs](#orgb5a06e6)
+    1.  [Introduction](#org5381d88)
+    2.  [Current State](#org67529c5)
+    3.  [Requirements To Run Tests](#orgafb45e2)
+2.  [HMAC](#org73d97ab)
 
 
-<a id="orge090024"></a>
+<a id="orgb5a06e6"></a>
 
 # NIST MCT and KATs
 
 
-<a id="orgcf7bdaa"></a>
+<a id="org5381d88"></a>
 
 ## Introduction
 
@@ -31,7 +32,7 @@ For more information on this test suite, please see the relevant papers from NIS
 -   [The Secure Hash Algorithm Validation System (SHAVS)](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/shs/SHAVS.pdf)
 
 
-<a id="org2ccc43e"></a>
+<a id="org67529c5"></a>
 
 ## Current State
 
@@ -40,7 +41,7 @@ everything outside of `SHAKE`.
 
 To address `SHAKE` a new parser for it must be implemented for the MCTs and KATs, after this is complete
 implementing the tests will be straight forward. There is not much heavy lifting involved in this, but
-much work needs to be put in (in the freetime that I have) for ensuring that these tests are being performed
+much work needs to be put in (in the free time that I have) for ensuring that these tests are being performed
 **correctly**. 
 
 We have a utility for loading the necessary associated data with each test from NIST, and validators to
@@ -56,7 +57,7 @@ The next steps are:
 5.  [ ] Create SHAKE MCT tests
 
 
-<a id="org596eab8"></a>
+<a id="orgafb45e2"></a>
 
 ## Requirements To Run Tests
 
@@ -72,4 +73,12 @@ So, again, you will need to have these installed on your machine to run the test
 
 -   `wget`
 -   `unzip`
+
+
+<a id="org73d97ab"></a>
+
+# HMAC
+
+HMAC CAVP (HMACVS) is implemented. The test requires `allow-non-fips` to be enabled, this is because the test vectors
+include keys which are not FIPS compliant.
 

@@ -96,17 +96,20 @@ pub const fn parse_assign(ident: &[u8]) -> impl FnOnce(&[u8]) -> Option<(&[u8], 
 
 #[inline]
 pub fn ignore_header(raw: &[u8]) -> &[u8] {
-    let mut rem = take_ignorable(raw);
+    take_length(raw).1
+}
 
-    // then we get this [L = some size], if we don't, just continue anyway
+#[inline]
+pub fn take_length(raw: &[u8]) -> (Option<&[u8]>, &[u8]) {
+    let rem = take_ignorable(raw);
 
-    if let Some(r) = take(b"[")(rem) {
-        rem = take_until(b']')(r).1; // ignore interior, denoted via file name
-        // take any remainder to ensure we have same perspective as if branch not taken.
-        rem = take_ignorable(rem);
+    match take(b"[")(rem) {
+        Some(rem) => {
+            let (inner, rem) = take_until(b']')(rem);
+            (take(b"L=")(inner), rem)
+        },
+        None => (None, rem)
     }
-
-    rem
 }
 
 #[inline]
