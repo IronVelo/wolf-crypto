@@ -1,4 +1,5 @@
 use core::fmt;
+use core::convert::Infallible;
 
 /// A generic error type representing an unspecified failure in cryptographic operations.
 ///
@@ -29,6 +30,11 @@ no_std_io! {
 impl From<crate::buf::InvalidSize> for Unspecified {
     #[inline]
     fn from(_value: crate::buf::InvalidSize) -> Self { Self }
+}
+
+impl From<Infallible> for Unspecified {
+    #[inline]
+    fn from(_value: Infallible) -> Self { Self }
 }
 
 /// A key derivation function was attempted to be used with zero iterations.
