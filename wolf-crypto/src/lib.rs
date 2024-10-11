@@ -68,6 +68,7 @@ extern crate alloc;
 
 #[cfg(test)]
 extern crate std;
+
 extern crate core;
 
 #[macro_use]
@@ -113,14 +114,43 @@ pub mod hex {
 pub use error::Unspecified;
 pub use error::MakeOpaque;
 
+#[cfg(target_pointer_width != "32")]
+#[inline]
 #[must_use]
 pub(crate) const fn const_can_cast_u32<const S: usize>() -> bool {
     const_lte::<S, { u32::MAX }>()
 }
 
+#[cfg(target_pointer_width != "32")]
 #[inline]
 #[must_use]
 pub(crate) const fn can_cast_u32(len: usize) -> bool {
+    len <= (u32::MAX as usize)
+}
+
+#[cfg(target_pointer_width = "32")]
+#[inline]
+#[must_use]
+pub(crate) const fn const_can_cast_u32<const S: usize>() -> bool {
+    true
+}
+
+#[cfg(target_pointer_width = "32")]
+#[inline]
+#[must_use]
+pub(crate) const fn can_cast_u32(_len: usize) -> bool {
+    true
+}
+
+#[inline]
+#[must_use]
+pub(crate) const fn const_can_cast_i32<const S: usize>() -> bool {
+    const_lte::<S, { i32::MAX as u32 }>()
+}
+
+#[inline]
+#[must_use]
+pub(crate) const fn can_cast_i32(len: usize) -> bool {
     len <= (u32::MAX as usize)
 }
 
@@ -149,6 +179,7 @@ pub(crate) const fn gte<const MIN: usize>(value: usize) -> bool {
     value >= MIN
 }
 
+#[cfg(target_pointer_width != "32")]
 #[inline]
 #[must_use]
 pub(crate) const fn to_u32(num: usize) -> Option<u32> {
@@ -157,4 +188,11 @@ pub(crate) const fn to_u32(num: usize) -> Option<u32> {
     } else {
         None
     }
+}
+
+#[cfg(target_pointer_width = "32")]
+#[inline]
+#[must_use]
+pub(crate) const fn to_u32(num: usize) -> Option<u32> {
+    Some(num as u32)
 }
