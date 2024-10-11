@@ -114,14 +114,14 @@ pub mod hex {
 pub use error::Unspecified;
 pub use error::MakeOpaque;
 
-#[cfg(target_pointer_width != "32")]
+#[cfg(not(target_pointer_width = "32"))]
 #[inline]
 #[must_use]
 pub(crate) const fn const_can_cast_u32<const S: usize>() -> bool {
     const_lte::<S, { u32::MAX }>()
 }
 
-#[cfg(target_pointer_width != "32")]
+#[cfg(not(target_pointer_width = "32"))]
 #[inline]
 #[must_use]
 pub(crate) const fn can_cast_u32(len: usize) -> bool {
@@ -179,7 +179,7 @@ pub(crate) const fn gte<const MIN: usize>(value: usize) -> bool {
     value >= MIN
 }
 
-#[cfg(target_pointer_width != "32")]
+#[cfg(not(target_pointer_width = "32"))]
 #[inline]
 #[must_use]
 pub(crate) const fn to_u32(num: usize) -> Option<u32> {
