@@ -2,7 +2,7 @@
 
 pub mod pbkdf2;
 
-use crate::{can_cast_u32, const_can_cast_u32, to_u32};
+use crate::{can_cast_i32, can_cast_u32, const_can_cast_i32, const_can_cast_u32, to_u32};
 use crate::sealed::AadSealed as Sealed;
 use core::num::NonZeroU32;
 use core::marker::PhantomData;
@@ -217,6 +217,14 @@ pub trait Salt<SZ: salt::MinSize>: Sealed {
 
     #[doc(hidden)]
     #[must_use]
+    fn i_size(&self) -> i32;
+
+    #[doc(hidden)]
+    #[must_use]
+    fn i_is_valid_size(&self) -> bool;
+
+    #[doc(hidden)]
+    #[must_use]
     fn ptr(&self) -> *const u8;
 }
 
@@ -230,6 +238,17 @@ impl Salt<salt::Empty> for [u8] {
     #[inline]
     fn is_valid_size(&self) -> bool {
         can_cast_u32(self.len())
+    }
+
+    #[inline]
+    fn i_size(&self) -> i32 {
+        debug_assert!(can_cast_i32(self.len()));
+        self.len() as i32
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        can_cast_i32(self.len())
     }
 
     #[inline]
@@ -251,6 +270,17 @@ impl<const C: usize> Salt<salt::Empty> for [u8; C] {
     }
 
     #[inline]
+    fn i_size(&self) -> i32 {
+        debug_assert!(const_can_cast_i32::<C>());
+        C as i32
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        const_can_cast_i32::<C>()
+    }
+
+    #[inline]
     fn ptr(&self) -> *const u8 {
         self.as_ptr()
     }
@@ -264,6 +294,10 @@ macro_rules! impl_salt_for_sizes {
                 fn size(&self) -> u32 { $sz }
                 #[inline]
                 fn is_valid_size(&self) -> bool { true }
+                #[inline]
+                fn i_size(&self) -> i32 { $sz }
+                #[inline]
+                fn i_is_valid_size(&self) -> bool { true }
                 #[inline]
                 fn ptr(&self) -> *const u8 { self.as_ptr() }
             }
@@ -292,6 +326,16 @@ impl Salt<salt::Empty> for () {
     }
 
     #[inline]
+    fn i_size(&self) -> i32 {
+        0
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        true
+    }
+
+    #[inline]
     fn ptr(&self) -> *const u8 {
         core::ptr::null()
     }
@@ -306,6 +350,16 @@ impl<T: Salt<SZ>, SZ: salt::MinSize> Salt<SZ> for &T {
     #[inline]
     fn is_valid_size(&self) -> bool {
         <T as Salt<SZ>>::is_valid_size(self)
+    }
+
+    #[inline]
+    fn i_size(&self) -> i32 {
+        <T as Salt<SZ>>::i_size(self)
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        <T as Salt<SZ>>::i_is_valid_size(self)
     }
 
     #[inline]
@@ -326,11 +380,26 @@ impl<T: Salt<SZ>, SZ: salt::MinSize> Salt<SZ> for &mut T {
     }
 
     #[inline]
+    fn i_size(&self) -> i32 {
+        <T as Salt<SZ>>::i_size(self)
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        <T as Salt<SZ>>::i_is_valid_size(self)
+    }
+
+    #[inline]
     fn ptr(&self) -> *const u8 {
         <T as Salt<SZ>>::ptr(self)
     }
 }
 
+/// A [`Salt`] with runtime flexibility.
+///
+/// The [`Salt`] trait, with its associated constraints, is implemented for most common types which
+/// meet the marker constraint for pure compile-time checks. However, this can be limiting, this
+/// type moves these compile-time checks to runtime.
 #[repr(transparent)]
 pub struct SaltSlice<'s, SZ: salt::MinSize> {
     raw: &'s [u8],
@@ -432,7 +501,7 @@ impl_salt_try_from! { salt::Min16 }
 impl<'s> From<&'s [u8]> for SaltSlice<'s, salt::Empty> {
     #[inline]
     fn from(value: &'s [u8]) -> Self {
-        Self::create(value.as_ref())
+        Self::create(value)
     }
 }
 
@@ -455,6 +524,17 @@ impl<'s, SZ: salt::MinSize> Salt<SZ> for SaltSlice<'s, SZ> {
     #[inline]
     fn is_valid_size(&self) -> bool {
         can_cast_u32(self.raw.len())
+    }
+
+    #[inline]
+    fn i_size(&self) -> i32 {
+        debug_assert!(can_cast_i32(self.raw.len()));
+        self.raw.len() as i32
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        can_cast_i32(self.raw.len())
     }
 
     #[inline]
