@@ -5,6 +5,9 @@ pub mod pbkdf2;
 use crate::{can_cast_u32, const_can_cast_u32, to_u32};
 use crate::sealed::AadSealed as Sealed;
 use core::num::NonZeroU32;
+use core::marker::PhantomData;
+use core::convert::Infallible;
+use crate::buf::InvalidSize;
 use crate::error::InvalidIters;
 
 non_fips! {
@@ -47,6 +50,14 @@ pub struct Iters { count: NonZeroU32 }
 impl Iters {
     /// Create a new `Iters` instance.
     ///
+    /// # Note
+    ///
+    /// Please see the [`Iters`] type documentation for more information and sources to assist in
+    /// picking the correct value. The value is context dependent, are you hashing a password?
+    /// You'll need a very large value, minimum 600,000. For key derivation, again it is context
+    /// dependent, how critical is this key? How powerful is the host machine? The general rule
+    /// is the bigger the value, the better in terms of security.
+    ///
     /// # Arguments
     ///
     /// * `iters` - The desired number of iterations (must be non-zero).
@@ -56,6 +67,14 @@ impl Iters {
     /// - `Some(Iters)`: The new `Iters` instance.
     /// - `None`: The provided `iters` argument was zero.
     pub const fn new(iters: u32) -> Option<Self> {
+        // Cool optimization rustc:
+        //
+        // define noundef i32 @new(i32 noundef returned %iters) unnamed_addr #0 {
+        // start:
+        //   ret i32 %iters
+        // }
+        //
+        // This is practically a no-op due to NPO.
         match NonZeroU32::new(iters) {
             Some(count) => Some(Self { count }),
             None => None
@@ -74,6 +93,7 @@ impl Iters {
 
     /// Returns the contained iteration count as a `u32`.
     #[inline]
+    #[must_use]
     pub const fn get(&self) -> u32 {
         self.count.get()
     }
@@ -115,34 +135,92 @@ impl TryFrom<usize> for Iters {
     }
 }
 
+pub mod salt {
+    //! Salt requirement marker types.
+    use super::{InvalidSize, Infallible};
+
+    /// Represents the minimum size for the [`Salt`].
+    ///
+    /// [`Salt`]: super::Salt
+    pub trait MinSize : super::Sealed {
+        /// The associated error type for creating a [`SaltSlice`] with this constraint.
+        ///
+        /// [`SaltSlice`]: super::SaltSlice
+        type CreateError;
+
+        /// Returns the minimum size for the [`Salt`].
+        ///
+        /// [`Salt`]: super::Salt
+        fn min_size() -> u32;
+    }
+
+    macro_rules! def_sz {
+        ($(
+            $(#[$meta:meta])*
+            $name:ident => $sz:literal => $err:ident
+        ),* $(,)?) => {
+            $(
+                $(#[$meta])*
+                pub struct $name;
+
+                impl super::Sealed for $name {}
+                impl MinSize for $name {
+                    type CreateError = $err;
+
+                    #[inline]
+                    fn min_size() -> u32 {
+                        $sz
+                    }
+                }
+            )*
+        };
+    }
+
+    def_sz! {
+        /// Indicates that the [`Salt`] may be empty / optional.
+        ///
+        /// [`Salt`]: super::Salt
+        Empty => 0 => Infallible,
+        /// Indicates that the [`Salt`] **must** not be empty.
+        ///
+        /// [`Salt`]: super::Salt
+        NonEmpty => 1 => InvalidSize,
+        /// Indicates that the [`Salt`] **must** be at least 128 bits (16 bytes).
+        ///
+        /// [`Salt`]: super::Salt
+        Min16 => 16 => InvalidSize
+    }
+}
+
 /// Represents a salt value used in key derivation functions (KDFs).
 ///
-/// This trait is implemented by types that can serve as salt inputs for various KDFs, such as
-/// `HKDF` (HMAC-based Key Derivation Function), `PBKDF1`, and `PBKDF2` (Password-Based Key
-/// Derivation Function).
+/// This is only implemented for `HKDF`, as other KDFs require salts (such as the `PBKDF`
+/// family), and for FIPS compliance, as per [NIST SP 800-132, Section 5.1, The Salt (S)][1]
+/// this salt must be at least 128 bits from a valid CSPRNG.
 ///
 /// Salt is a critical component in KDFs, used to:
 /// - Increase the complexity of the derived key
 /// - Mitigate rainbow table attacks
 /// - Ensure unique keys even when the same input is used multiple times
 ///
-/// Of course, salts are optional, but strongly recommended. If you do not wish to use a salt
-/// (which is not recommended), you may use the unit type (`()`).
-pub trait Salt : Sealed {
+/// Salts may be optional, this depends on the `MinSz` type.
+///
+/// [1]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-132.pdf#%5B%7B%22num%22%3A18%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C0%2C475%2Cnull%5D
+pub trait Salt<SZ: salt::MinSize>: Sealed {
     #[doc(hidden)]
     #[must_use]
     fn size(&self) -> u32;
-    
+
     #[doc(hidden)]
     #[must_use]
     fn is_valid_size(&self) -> bool;
-    
+
     #[doc(hidden)]
     #[must_use]
     fn ptr(&self) -> *const u8;
 }
 
-impl Salt for [u8] {
+impl Salt<salt::Empty> for [u8] {
     #[inline]
     fn size(&self) -> u32 {
         debug_assert!(can_cast_u32(self.len()));
@@ -160,7 +238,7 @@ impl Salt for [u8] {
     }
 }
 
-impl<const C: usize> Salt for [u8; C] {
+impl<const C: usize> Salt<salt::Empty> for [u8; C] {
     #[inline]
     fn size(&self) -> u32 {
         debug_assert!(const_can_cast_u32::<C>());
@@ -178,7 +256,31 @@ impl<const C: usize> Salt for [u8; C] {
     }
 }
 
-impl Salt for () {
+macro_rules! impl_salt_for_sizes {
+    ($constraint:ty => [$($sz:literal),*]) => {
+        $(
+            impl Salt<$constraint> for [u8; $sz] {
+                #[inline]
+                fn size(&self) -> u32 { $sz }
+                #[inline]
+                fn is_valid_size(&self) -> bool { true }
+                #[inline]
+                fn ptr(&self) -> *const u8 { self.as_ptr() }
+            }
+        )*
+    };
+}
+
+impl_salt_for_sizes! { salt::Min16 => [
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 48, 64
+]}
+
+impl_salt_for_sizes! { salt::NonEmpty => [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 48, 64
+]}
+
+impl Salt<salt::Empty> for () {
     #[inline]
     fn size(&self) -> u32 {
         0
@@ -195,37 +297,169 @@ impl Salt for () {
     }
 }
 
-impl<T: Salt> Salt for &T {
+impl<T: Salt<SZ>, SZ: salt::MinSize> Salt<SZ> for &T {
     #[inline]
     fn size(&self) -> u32 {
-        <T as Salt>::size(self)
+        <T as Salt<SZ>>::size(self)
     }
 
     #[inline]
     fn is_valid_size(&self) -> bool {
-        <T as Salt>::is_valid_size(self)
+        <T as Salt<SZ>>::is_valid_size(self)
     }
 
     #[inline]
     fn ptr(&self) -> *const u8 {
-        <T as Salt>::ptr(self)
+        <T as Salt<SZ>>::ptr(self)
     }
 }
 
-impl<T: Salt> Salt for &mut T {
+impl<T: Salt<SZ>, SZ: salt::MinSize> Salt<SZ> for &mut T {
     #[inline]
     fn size(&self) -> u32 {
-        <T as Salt>::size(self)
+        <T as Salt<SZ>>::size(self)
     }
 
     #[inline]
     fn is_valid_size(&self) -> bool {
-        <T as Salt>::is_valid_size(self)
+        <T as Salt<SZ>>::is_valid_size(self)
     }
 
     #[inline]
     fn ptr(&self) -> *const u8 {
-        <T as Salt>::ptr(self)
+        <T as Salt<SZ>>::ptr(self)
+    }
+}
+
+#[repr(transparent)]
+pub struct SaltSlice<'s, SZ: salt::MinSize> {
+    raw: &'s [u8],
+    _min_size: PhantomData<SZ>
+}
+
+macro_rules! impl_salt_for {
+    ($sz:ty => { $item:item }) => {
+        impl<'s> SaltSlice<'s, $sz> {
+            $item
+        }
+    };
+}
+
+impl_salt_for! { salt::Empty => {
+    /// Create a new `SaltSlice` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `slice` - The [`Salt`] (if any) to use.
+    ///
+    /// # Errors
+    ///
+    /// This is infallible, the only reason this returns a result is to keep this `new`
+    /// implementation in sync with other [`Salt`] constraints (this being the weakest / most
+    /// permissive constraint).
+    pub const fn new(slice: &'s [u8]) -> Result<Self, Infallible> {
+        Ok(Self::create(slice))
+    }
+}}
+
+impl_salt_for! { salt::NonEmpty => {
+    /// Create a new `SaltSlice` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `slice` - The [`Salt`], which must be non-empty.
+    ///
+    /// # Errors
+    ///
+    /// This requires the provided slice to be **non-empty**, this is the second-weakest constraint,
+    /// and only leveraged with `allow-non-fips` enabled. In general, for KDFs such as PBKDF it is
+    /// **strongly recommended** to use at least a 128 bit (16 byte) salt generated from a valid
+    /// `CSPRNG`.
+    pub const fn new(slice: &'s [u8]) -> Result<Self, InvalidSize> {
+        if !slice.is_empty() {
+            Ok(Self::create(slice))
+        } else {
+            Err(InvalidSize)
+        }
+    }
+}}
+
+impl_salt_for! { salt::Min16 => {
+    /// Create a new `SaltSlice` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `slice` - The [`Salt`], which must be at least 128 bits (16 bytes).
+    ///
+    /// # Errors
+    ///
+    /// This requires that the provided slice is **at least** 128 bits (16 bytes), this is the
+    /// strongest constraint as it enforces this best practice (as well as FIPS requirement).
+    /// Regardless if the interface requires this constraint it is **strongly recommended** to use
+    /// a 128 bit salt generated from a valid `CSPRNG`.
+    pub const fn new(slice: &'s [u8]) -> Result<Self, InvalidSize> {
+        if slice.len() >= 16 {
+            Ok(Self::create(slice))
+        } else {
+            Err(InvalidSize)
+        }
+    }
+}}
+
+impl<'s, SZ: salt::MinSize> SaltSlice<'s, SZ> {
+    #[inline]
+    const fn create(raw: &'s [u8]) -> Self {
+        Self { raw, _min_size: PhantomData }
+    }
+}
+
+macro_rules! impl_salt_try_from {
+    ($ty:ty) => {
+        impl<'s> TryFrom<&'s [u8]> for SaltSlice<'s, $ty> {
+            type Error = <$ty as salt::MinSize>::CreateError;
+
+            #[inline]
+            fn try_from(value: &'s [u8]) -> Result<Self, Self::Error> {
+                Self::new(value)
+            }
+        }
+    };
+}
+
+impl_salt_try_from! { salt::NonEmpty }
+impl_salt_try_from! { salt::Min16 }
+
+impl<'s> From<&'s [u8]> for SaltSlice<'s, salt::Empty> {
+    #[inline]
+    fn from(value: &'s [u8]) -> Self {
+        Self::create(value.as_ref())
+    }
+}
+
+impl<'s> From<&'s [u8; 16]> for SaltSlice<'s, salt::Min16> {
+    #[inline]
+    fn from(value: &'s [u8; 16]) -> Self {
+        Self::create(value)
+    }
+}
+
+impl<'s, SZ: salt::MinSize> Sealed for SaltSlice<'s, SZ> {}
+
+impl<'s, SZ: salt::MinSize> Salt<SZ> for SaltSlice<'s, SZ> {
+    #[inline]
+    fn size(&self) -> u32 {
+        debug_assert!(can_cast_u32(self.raw.len()));
+        self.raw.len() as u32
+    }
+
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        can_cast_u32(self.raw.len())
+    }
+
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        self.raw.as_ptr()
     }
 }
 
