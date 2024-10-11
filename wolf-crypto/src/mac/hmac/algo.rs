@@ -18,7 +18,7 @@ non_fips! {
     use wolf_crypto_sys::{WC_MD5, WC_SHA};
 }
 
-/// Represents a valid key size for `HMAC`.
+/// Represents a valid key size for the associated hashing algorithm.
 pub trait KeySz : Sealed {
     /// Returns the associated size as a `u32`.
     ///
@@ -27,7 +27,7 @@ pub trait KeySz : Sealed {
     fn size() -> u32;
 }
 
-/// Represents a valid key for `HMAC`.
+/// Represents a valid key for the associated hashing algorithm..
 pub trait GenericKey : Sealed {
     /// The desired size of the key.
     type Size: KeySz;
@@ -69,12 +69,13 @@ pub trait Digest : Sealed + AsRef<[u8]> + AsMut<[u8]> + Copy {
     fn ptr(&mut self) -> *mut u8;
 }
 
-/// The hashing algorithm to use with `HMAC`.
+/// Indicates the hashing algorithm to use with message authentication codes and key derivation
+/// functions.
 pub trait Hash : Sealed {
     /// Represents the output digest of the hash function.
     type Digest: Digest;
 
-    /// The associated key length for `HMAC` with this hashing function.
+    /// The associated key length for this hashing function.
     ///
     /// In [`RFC2104`, Section 3 `Keys`][1], it states that the key for `HMAC` can be of any length,
     /// **however** keys less than length `L` (the length of the output (SHA256 being 256 bits)) are
@@ -86,6 +87,8 @@ pub trait Hash : Sealed {
     ///
     /// All modern usages of `HMAC`, for example in TLS, use the same key length as the digest
     /// length (`L`).
+    ///
+    /// These recommendations remain unaltered for key derivation functions.
     /// 
     /// ## Larger Keys
     /// 
@@ -98,8 +101,7 @@ pub trait Hash : Sealed {
     ///    considered weak.
     /// ```
     /// 
-    /// Keys larger than the digest / hash output size will be hashed during the initialization of 
-    /// the `HMAC` instance.
+    /// Keys larger than the digest / hash output size will be hashed.
     /// 
     /// [1]: https://www.rfc-editor.org/rfc/rfc2104#section-3
     type KeyLen: KeySz;
@@ -144,10 +146,10 @@ macro_rules! make_digest {
             }
 
             #[doc = concat!(
-                "Generic representation of a ", stringify!($sz), " byte key for `HMAC`."
+                "Generic representation of a ", stringify!($sz), " byte key for `HMAC` or KDFs."
             )]
             #[doc = ""]
-            #[doc = "It is strongly recommended that the key length in `HMAC` is equivalent "]
+            #[doc = "It is strongly recommended that the key length is equivalent "]
             #[doc = "to the hash functions digest size. (SHA256 means 256 bit (32 byte) key)."]
             pub struct $name;
 
@@ -206,8 +208,8 @@ macro_rules! make_digest {
     };
 }
 
-/// Represents a key for `HMAC` which has a length greater than or equal to the length of the
-/// hash function's digest.
+/// Represents a key for the associated hashing algorithm which has a length greater than or
+/// equal to the length of the hash function's digest.
 #[repr(transparent)]
 pub struct KeySlice<'k, SZ: KeySz> {
     inner: &'k [u8],
@@ -270,7 +272,7 @@ impl<'k, SZ: KeySz> TryFrom<&'k [u8]> for KeySlice<'k, SZ> {
     }
 }
 
-/// Represents a key for `HMAC` which can be **insecure**.
+/// Represents a key associated with the desired hashing function which can be **insecure**.
 ///
 /// # Security
 ///
@@ -329,7 +331,7 @@ impl<'k, SZ: KeySz> InsecureKey<'k, SZ> {
     /// - `allow-non-fips` enabled:
     ///   This will return `InvalidSize` if the provided key is empty.
     /// - `allow-non-fips` disabled:
-    ///   Pursuant to the FIPS requirements for HMAC (for more information again read the
+    ///   Pursuant to the FIPS requirements for HMAC and KDFs (for more information again read the
     ///   [`InsecureKey`]'s type documentation), this will return `InvalidSize` if the provided
     ///   key is shorter than the minimum acceptable FIPS standard of 14 bytes.
     /// - any configuration:
@@ -383,7 +385,7 @@ impl<'k, SZ: KeySz> TryFrom<&'k [u8]> for InsecureKey<'k, SZ> {
     /// - `allow-non-fips` enabled:
     ///   This will return `InvalidSize` if the provided key is empty.
     /// - `allow-non-fips` disabled:
-    ///   Pursuant to the FIPS requirements for HMAC (for more information again read the
+    ///   Pursuant to the FIPS requirements for HMAC and KDFs (for more information again read the
     ///   [`InsecureKey`]'s type documentation), this will return `InvalidSize` if the provided
     ///   key is shorter than the minimum acceptable FIPS standard of 14 bytes.
     /// - any configuration:
@@ -432,7 +434,7 @@ make_digest! { (U28, 28), (U32, 32), (U48, 48), (U64, 64) }
 #[cfg(feature = "allow-non-fips")]
 make_algo_type! {
     (
-        /// The `MD5` HMAC Hash Function.
+        /// The `MD5` Hash Function Marker Type.
         ///
         /// `MD5` should be [considered cryptographically broken and unsuitable for further use][1].
         /// Collision attacks against `MD5` are both practical and trivial, theoretical attacks
@@ -444,7 +446,7 @@ make_algo_type! {
         Md5, U16, WC_MD5
     ),
     (
-        /// The `SHA-1` HMAC Hash Function.
+        /// The `SHA-1` Hash Function Marker Type.
         ///
         /// The SHA-1 algorithm is included in this library for legacy reasons only. It is
         /// cryptographically broken and should not be used for any security-critical or modern
@@ -459,35 +461,35 @@ make_algo_type! {
 
 make_algo_type! {
     (
-        /// The `SHA224` HMAC Hash Function.
+        /// The `SHA224` Hash Function Marker Type.
         Sha224, U28, WC_SHA224
     ),
     (
-        /// The `SHA256` HMAC Hash Function.
+        /// The `SHA256` Hash Function Marker Type.
         Sha256, U32, WC_SHA256
     ),
     (
-        /// The `SHA384` HMAC Hash Function.
+        /// The `SHA384` Hash Function Marker Type.
         Sha384, U48, WC_SHA384
     ),
     (
-        /// The `SHA512` HMAC Hash Function.
+        /// The `SHA512` Hash Function Marker Type.
         Sha512, U64, WC_SHA512
     ),
     (
-        /// The `SHA3-224` HMAC Hash Function.
+        /// The `SHA3-224` Hash Function Marker Type.
         Sha3_224, U28, WC_SHA3_224
     ),
     (
-        /// The `SHA3-256` HMAC Hash Function.
+        /// The `SHA3-256` Hash Function Marker Type.
         Sha3_256, U32, WC_SHA3_256
     ),
     (
-        /// The `SHA3-384` HMAC Hash Function.
+        /// The `SHA3-384` Hash Function Marker Type.
         Sha3_384, U48, WC_SHA3_384
     ),
     (
-        /// The `SHA3-512` HMAC Hash Function.
+        /// The `SHA3-512` Hash Function Marker Type.
         Sha3_512, U64, WC_SHA3_512
     )
 }
