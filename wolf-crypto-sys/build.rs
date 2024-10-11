@@ -64,7 +64,9 @@ fn main() {
         .clang_arg("-DWOLFSSL_RIPEMD")
         .clang_arg("-DHAVE_RIPEMD")
         .clang_arg("-DHAVE_CHACHA")
-        .clang_arg("-DHAVE_POLY1305");
+        .clang_arg("-DHAVE_POLY1305")
+        .clang_arg("-DHAVE_HKDF")
+        .clang_arg("-DHAVE_PBKDF2");
         //.clang_arg("-DHAVE_FIPS");
 
     // if is_x86_target() {
@@ -99,6 +101,7 @@ fn main() {
 
     let mut build = cc::Build::new();
     build
+        .static_flag(true)
         .include("wolfcrypt/include")
         .include("wolfcrypt/src")
         .define("WOLFCRYPT_ONLY", None)
@@ -125,7 +128,9 @@ fn main() {
         .define("WOLFSSL_RIPEMD", None)
         .define("HAVE_RIPEMD", None)
         .define("HAVE_CHACHA", None)
-        .define("HAVE_POLY1305", None);
+        .define("HAVE_POLY1305", None)
+        .define("HAVE_HKDF", None)
+        .define("HAVE_PBKDF2", None);
         // .define("HAVE_FIPS", None);
 
     // if is_x86_target() {
@@ -136,9 +141,8 @@ fn main() {
 
     build.files(source_files.into_iter().map(SourceFile::path))
         // .objects(assembled)
-        .debug(true)
         .compile("wolfcrypt");
 
-    println!("cargo:rustc-link-lib=static=wolfcrypt");
     println!("cargo:rustc-link-search=native={}", out_path.display());
+    println!("cargo:rustc-link-lib=static=wolfcrypt");
 }
