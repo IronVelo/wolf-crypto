@@ -16,7 +16,7 @@ use crate::mac::hmac::algo::{GenericKey, Hash};
 ///
 /// # Safety
 ///
-/// This function is unsafe because it does not perform any input validation.
+/// This does not perform any input validation.
 /// The caller must ensure that all input sizes are valid and can be cast to u32.
 #[inline]
 unsafe fn hkdf_unchecked<H: Hash>(
