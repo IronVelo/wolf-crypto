@@ -17,6 +17,7 @@ impl fmt::Debug for Tag {
 impl Tag {
     /// The size of the authentication tag in bytes.
     pub const CAPACITY: usize = 16;
+    #[cfg(feature = "allow-non-fips")]
     pub(crate) const SIZE: u32 = 16;
 
     /// Creates a new `Tag` instance from a 16-byte array.
