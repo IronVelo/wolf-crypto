@@ -28,9 +28,27 @@ no_std_io! {
 
 impl From<crate::buf::InvalidSize> for Unspecified {
     #[inline]
-    fn from(_value: crate::buf::InvalidSize) -> Self {
-        Self
+    fn from(_value: crate::buf::InvalidSize) -> Self { Self }
+}
+
+/// A key derivation function was attempted to be used with zero iterations.
+#[derive(Debug, Copy, Clone)]
+pub struct InvalidIters;
+
+impl fmt::Display for InvalidIters {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("InvalidIters")
     }
+}
+
+std! {
+    impl std::error::Error for InvalidIters {}
+}
+
+impl From<InvalidIters> for Unspecified {
+    #[inline]
+    fn from(_value: InvalidIters) -> Self { Self }
 }
 
 /// Trait for transforming a `Result<T, E>` into a `Result<T, Unspecified>`.
