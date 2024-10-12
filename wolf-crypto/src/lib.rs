@@ -151,7 +151,7 @@ pub(crate) const fn const_can_cast_i32<const S: usize>() -> bool {
 #[inline]
 #[must_use]
 pub(crate) const fn can_cast_i32(len: usize) -> bool {
-    len <= (u32::MAX as usize)
+    len <= (i32::MAX as usize)
 }
 
 #[must_use]

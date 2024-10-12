@@ -1,4 +1,4 @@
-//! Hashed-Based Message Authentication Codes `HMAC`.
+//! Keyed Hash Message Authentication Codes `HMAC`.
 
 pub mod algo;
 mod digest;
@@ -765,6 +765,7 @@ mod property_tests {
             prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
         }
 
+        #[cfg(feature = "allow-non-fips")]
         #[test]
         fn rust_crypto_equivalence_sha1(
             input in any::<BoundList<1024>>(),
@@ -783,6 +784,7 @@ mod property_tests {
             prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
         }
 
+        #[cfg(feature = "allow-non-fips")]
         #[test]
         fn rust_crypto_equivalence_many_updates_sha1(
             input in any::<AnyList<32, BoundList<256>>>(),
@@ -803,6 +805,7 @@ mod property_tests {
             prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
         }
 
+        #[cfg(feature = "allow-non-fips")]
         #[test]
         fn rust_crypto_equivalence_md5(
             input in any::<BoundList<1024>>(),
@@ -821,6 +824,7 @@ mod property_tests {
             prop_assert!(wc.compare_digest_slice(rc_out.as_slice()));
         }
 
+        #[cfg(feature = "allow-non-fips")]
         #[test]
         fn rust_crypto_equivalence_many_updates_md5(
             input in any::<AnyList<32, BoundList<256>>>(),

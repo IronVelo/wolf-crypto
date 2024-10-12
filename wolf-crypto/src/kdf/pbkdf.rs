@@ -110,7 +110,7 @@ const fn const_check_key_len<const L: usize>() -> bool {
 ///
 /// let password = b"my secret password";
 /// let salt = [42; 16];
-/// let iters = Iters::new(300_000).unwrap();
+/// let iters = Iters::new(600_000).unwrap();
 /// let mut out_key = [0u8; 32];
 ///
 /// pbkdf2_into::<Sha256>(password, salt, iters, out_key.as_mut_slice()).unwrap();
@@ -159,7 +159,7 @@ pub fn pbkdf2_into<H: Hash>(
 ///
 /// let password = b"my secret password";
 /// let salt = [42; 16];
-/// let iters = Iters::new(300_000).unwrap();
+/// let iters = Iters::new(600_000).unwrap();
 ///
 /// let key = pbkdf2::<32, Sha256>(password, salt, iters).unwrap();
 /// assert_eq!(key.len(), 32);
@@ -236,7 +236,7 @@ non_fips! {
     ///
     /// let password = b"my secret password";
     /// let salt = [42; 16];
-    /// let iters = Iters::new(300_000).unwrap();
+    /// let iters = Iters::new(600_000).unwrap();
     /// let mut out_key = [0u8; 32];
     ///
     /// pbkdf1_into::<Sha256>(password, salt, iters, out_key.as_mut_slice()).unwrap();
@@ -280,7 +280,7 @@ non_fips! {
     ///
     /// let password = b"my secret password";
     /// let salt = [42; 16];
-    /// let iters = Iters::new(300_000).unwrap();
+    /// let iters = Iters::new(600_000).unwrap();
     ///
     /// let key = pbkdf1::<32, Sha256>(password, salt, iters).unwrap();
     /// assert_eq!(key.len(), 32);
@@ -300,5 +300,173 @@ non_fips! {
         } else {
             Err(Unspecified)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kdf::{FipsSaltSlice, Sha256};
+
+    macro_rules! bogus_slice {
+        ($sz:expr) => {{
+            unsafe { core::slice::from_raw_parts(b"bogus".as_ptr(), $sz) }
+        }};
+        (mut $sz:expr) => {{
+            unsafe { core::slice::from_raw_parts_mut(b"bogus".as_ptr().cast_mut(), $sz) }
+        }};
+    }
+
+    #[test]
+    fn catch_pwd_overflow() {
+        let pass = bogus_slice!(i32::MAX as usize + 1);
+        assert!(pbkdf2::<32, Sha256>(pass, [0u8; 16], Iters::new(100).unwrap()).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1::<32, Sha256>(pass, [0u8; 16], Iters::new(100).unwrap()).is_err());
+        }
+
+        let mut out = [0; 69];
+        assert!(pbkdf2_into::<Sha256>(pass, [0u8; 16], Iters::new(100).unwrap(), &mut out).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1_into::<Sha256>(pass, [0u8; 16], Iters::new(100).unwrap(), &mut out).is_err());
+        }
+    }
+
+    #[test]
+    fn catch_salt_overflow() {
+        let salt = FipsSaltSlice::new(bogus_slice!(i32::MAX as usize + 1)).unwrap();
+        let pass = b"my password";
+        assert!(pbkdf2::<32, Sha256>(pass, salt.clone(), Iters::new(100).unwrap()).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1::<32, Sha256>(pass, salt.clone(), Iters::new(100).unwrap()).is_err());
+        }
+
+        let mut out = [0; 69];
+        assert!(pbkdf2_into::<Sha256>(pass, salt.clone(), Iters::new(100).unwrap(), &mut out).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1_into::<Sha256>(pass, salt.clone(), Iters::new(100).unwrap(), &mut out).is_err());
+        }
+    }
+
+    #[test]
+    fn catch_iters_overflow() {
+        let salt = [0u8; 16];
+        let pass = b"my password";
+        let iters = Iters::new(i32::MAX as u32 + 1).unwrap();
+        assert!(pbkdf2::<32, Sha256>(pass, salt.clone(), iters).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1::<32, Sha256>(pass, salt.clone(), iters).is_err());
+        }
+
+        let mut out = [0; 69];
+        assert!(pbkdf2_into::<Sha256>(pass, salt.clone(), iters, &mut out).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1_into::<Sha256>(pass, salt.clone(), iters, &mut out).is_err());
+        }
+    }
+
+    #[test]
+    fn catch_desired_key_overflow() {
+        // we don't want to put u32 max on the stack, so we will not test the array convenience func
+        // in this case.
+        let desired = bogus_slice!(mut i32::MAX as usize + 1);
+        let salt = [0u8; 16];
+        let pass = b"my password";
+        assert!(pbkdf2_into::<Sha256>(pass, salt.clone(), Iters::new(100).unwrap(), desired).is_err());
+        #[cfg(feature = "allow-non-fips")] {
+            assert!(pbkdf1_into::<Sha256>(pass, salt.clone(), Iters::new(100).unwrap(), desired).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(feature = "allow-non-fips", ignore)]
+    fn catch_fips_min_key() {
+        let mut out = [0u8; 13];
+        assert!(pbkdf2::<13, Sha256>(b"hello world", [0u8; 16], Iters::new(100).unwrap()).is_err());
+        assert!(pbkdf2_into::<Sha256>(b"hello world", [0u8; 16], Iters::new(100).unwrap(), &mut out).is_err());
+    }
+}
+
+#[cfg(test)]
+mod property_tests {
+    // TODO: impl NIST CAVS tests.
+
+    use proptest::prelude::*;
+    use crate::aes::test_utils::BoundList;
+    use super::*;
+
+    use crate::kdf::{Sha256, Sha384, Sha512};
+    use crate::kdf::DynSaltSlice as SaltSlice;
+
+    use pbkdf2::{pbkdf2_hmac};
+
+    macro_rules! against_rc_into {
+        (
+            name: $name:ident,
+            cases: $cases:literal,
+            max_iters: $max_iters:literal,
+            algo: $algo:ident
+        ) => {proptest! {
+            #![proptest_config(ProptestConfig::with_cases($cases))]
+
+            #[test]
+            fn $name(
+                pwd in any::<BoundList<512>>(),
+                salt in any::<BoundList<512>>(),
+                // I do not have the remainder of the year to wait for this to pass. I've run this
+                // with 100k on release, I ate a meal and it was still running.
+                iters in 1..$max_iters,
+                key_len in 1..1024usize
+            ) {
+                #[cfg(feature = "allow-non-fips")] {
+                    prop_assume!(!salt.as_slice().is_empty());
+                }
+
+                #[cfg(not(feature = "allow-non-fips"))] {
+                    prop_assume!(salt.len() >= 16);
+                    prop_assume!(key_len >= 14);
+                }
+
+                let mut key_buf = BoundList::<1024>::new_zeroes(key_len);
+                let mut rc_key_buf = key_buf.create_self();
+
+                pbkdf2_into::<$algo>(
+                    pwd.as_slice(),
+                    SaltSlice::new(salt.as_slice()).unwrap(),
+                    Iters::new(iters).unwrap(),
+                    key_buf.as_mut_slice()
+                ).unwrap();
+
+                pbkdf2_hmac::<sha2::$algo>(
+                    pwd.as_slice(),
+                    salt.as_slice(),
+                    iters,
+                    rc_key_buf.as_mut_slice()
+                );
+
+                prop_assert_eq!(key_buf.as_slice(), rc_key_buf.as_slice());
+            }
+        }};
+    }
+
+    against_rc_into! {
+        name: rust_crypto_equivalence_sha256,
+        cases: 5000,
+        max_iters: 100u32,
+        algo: Sha256
+    }
+
+    against_rc_into! {
+        name: rust_crypto_equivalence_sha384,
+        cases: 5000,
+        max_iters: 100u32,
+        algo: Sha384
+    }
+
+    against_rc_into! {
+        name: rust_crypto_equivalence_sha512,
+        cases: 5000,
+        max_iters: 50u32,
+        algo: Sha512
     }
 }

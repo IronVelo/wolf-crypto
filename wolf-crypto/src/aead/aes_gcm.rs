@@ -499,7 +499,7 @@ mod gcm_test_utils {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "can-panic"))]
 mod tests {
     use super::*;
     use aes_gcm::{Aes256Gcm, KeyInit};
@@ -704,7 +704,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(all(test, not(miri), feature = "can-panic"))]
 mod property_tests {
     use proptest::prelude::*;
     use crate::aead::AadSlice;

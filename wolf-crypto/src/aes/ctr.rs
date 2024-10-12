@@ -419,7 +419,7 @@ unsafe impl Send for AesCtr {}
 // underlying AES instance require a mutable reference, thus making this safe to mark `Sync`.
 unsafe impl Sync for AesCtr {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "can-panic"))]
 mod tests {
     use ctr::Ctr128BE;
     use aes::Aes256;
@@ -500,7 +500,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(all(test, not(miri), feature = "can-panic"))]
 mod property_tests {
     use aes::{Aes256, Aes192, Aes128};
     use ctr::cipher::{KeyIvInit, StreamCipher};

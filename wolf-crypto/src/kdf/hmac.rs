@@ -139,3 +139,112 @@ pub fn hkdf_into<H: Hash>(
     }
 }
 
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use crate::aes::test_utils::BoundList;
+    use proptest::prelude::*;
+    use hkdf::Hkdf;
+
+    macro_rules! against_rc {
+        (
+            name: $name:ident,
+            cases: $cases:literal,
+            algo: $rc_crate:ident :: $algo:ident,
+            ds: $ds:literal
+        ) => {proptest! {
+        #![proptest_config(ProptestConfig::with_cases(5_000))]
+
+        #[test]
+        fn $name(
+            key in any::<[u8; $ds]>(),
+            salt in any::<Option<BoundList<128>>>()
+        ) {
+            let salt = salt.as_ref().map(BoundList::as_slice);
+
+            let mut rc_out = [0u8; $ds];
+            Hkdf::<$rc_crate::$algo>::new(salt, key.as_slice()).expand(b"", rc_out.as_mut_slice()).unwrap();
+
+            let out = hkdf::<$crate::kdf::$algo, { $ds }>(key, salt, ()).unwrap();
+
+            prop_assert_eq!(out, rc_out);
+        }
+        }};
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha224,
+        cases: 5000,
+        algo: sha2::Sha224,
+        ds: 28
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha256,
+        cases: 5000,
+        algo: sha2::Sha256,
+        ds: 32
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha384,
+        cases: 5000,
+        algo: sha2::Sha384,
+        ds: 48
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha512,
+        cases: 2500,
+        algo: sha2::Sha512,
+        ds: 64
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha3_224,
+        cases: 5000,
+        algo: sha3::Sha3_224,
+        ds: 28
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha3_256,
+        cases: 5000,
+        algo: sha3::Sha3_256,
+        ds: 32
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha3_384,
+        cases: 5000,
+        algo: sha3::Sha3_384,
+        ds: 48
+    }
+
+    against_rc! {
+        name: rust_crypto_equivalence_sha3_512,
+        cases: 2500,
+        algo: sha3::Sha3_512,
+        ds: 64
+    }
+    
+    mod sha1 {
+        pub use sha1::Sha1 as Sha;
+    }
+    
+    non_fips! {
+        against_rc! {
+            name: rust_crypto_equivalence_sha1,
+            cases: 10000,
+            algo: sha1::Sha,
+            ds: 20
+        }
+        
+        against_rc! {
+            name: rust_crypto_equivalence_md5,
+            cases: 10000,
+            algo: md5::Md5,
+            ds: 16
+        }
+    }
+}
