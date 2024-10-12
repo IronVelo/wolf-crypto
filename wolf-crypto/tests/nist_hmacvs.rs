@@ -13,8 +13,11 @@ use std::fs;
 use wolf_crypto::mac::hmac::{
     Hmac,
     algo::InsecureKey,
-    Sha, Sha224, Sha256, Sha384, Sha512
+    Sha224, Sha256, Sha384, Sha512
 };
+
+#[cfg(feature = "allow-non-fips")]
+use wolf_crypto::mac::hmac::Sha;
 
 
 #[test]
@@ -31,12 +34,14 @@ fn hmacvs() {
         match test.next_case() {
             Ok(Case { algo, key, msg, tag }) => match algo {
                 Algo::Sha1 => {
-                    let mut hmac = Hmac::<Sha>::new(
-                        InsecureKey::new(key.as_slice()).unwrap()
-                    );
-                    hmac.update(msg.as_slice()).unwrap();
-                    let digest = hmac.finalize().into_inner();
-                    assert_eq!(&digest[..tag.len()], tag.as_slice());
+                    #[cfg(feature = "allow-non-fips")] {
+                        let mut hmac = Hmac::<Sha>::new(
+                            InsecureKey::new(key.as_slice()).unwrap()
+                        );
+                        hmac.update(msg.as_slice()).unwrap();
+                        let digest = hmac.finalize().into_inner();
+                        assert_eq!(&digest[..tag.len()], tag.as_slice());
+                    }
                 },
                 Algo::Sha224 => {
                     let mut hmac = Hmac::<Sha224>::new(

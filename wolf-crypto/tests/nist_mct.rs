@@ -24,7 +24,6 @@ use wolf_crypto::hash::{
     Sha3_384,
     Sha3_512,
 
-    Sha,
     Sha224,
     Sha256,
     Sha384,
@@ -33,6 +32,8 @@ use wolf_crypto::hash::{
     Sha512_256
 };
 
+#[cfg(feature = "allow-non-fips")]
+use wolf_crypto::hash::Sha;
 
 macro_rules! make_mc_test {
     ($files:ident with sz: $sz:literal, hasher: $hasher:ty) => {{
@@ -176,6 +177,7 @@ macro_rules! make_md_mct {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha3_224_nist_mct() {
     load_tests().unwrap();
     make_mc_test! {
@@ -186,6 +188,7 @@ fn sha3_224_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha3_256_nist_mct() {
     load_tests().unwrap();
     make_mc_test! {
@@ -196,6 +199,7 @@ fn sha3_256_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha3_384_nist_mct() {
     load_tests().unwrap();
     make_mc_test! {
@@ -206,6 +210,7 @@ fn sha3_384_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha3_512_nist_mct() {
     load_tests().unwrap();
     make_mc_test! {
@@ -216,6 +221,8 @@ fn sha3_512_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
+#[cfg(feature = "allow-non-fips")]
 fn sha1_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {
@@ -226,6 +233,7 @@ fn sha1_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha224_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {
@@ -236,6 +244,7 @@ fn sha224_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha256_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {
@@ -247,6 +256,7 @@ fn sha256_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha384_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {
@@ -258,6 +268,7 @@ fn sha384_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha512_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {
@@ -269,6 +280,7 @@ fn sha512_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha512_224_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {
@@ -279,6 +291,7 @@ fn sha512_224_nist_mct() {
 }
 
 #[test]
+#[cfg(feature = "can-panic")]
 fn sha512_256_nist_mct() {
     load_tests().unwrap();
     make_md_mct! {

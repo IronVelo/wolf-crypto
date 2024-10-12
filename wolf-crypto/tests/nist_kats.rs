@@ -23,7 +23,6 @@ use wolf_crypto::hash::{
     Sha3_384,
     Sha3_512,
 
-    Sha,
     Sha224,
     Sha256,
     Sha384,
@@ -31,6 +30,9 @@ use wolf_crypto::hash::{
     Sha512_224,
     Sha512_256
 };
+
+#[cfg(feature = "allow-non-fips")]
+use wolf_crypto::hash::Sha;
 
 use crate::common::kat::{is_short_kat, is_long_kat, KnownTest};
 use std::fs;
@@ -137,6 +139,7 @@ fn nist_sha3_512_long_kat() {
     }
 }
 
+#[cfg(feature = "allow-non-fips")]
 #[test]
 fn nist_sha1_short_kat() {
     load_tests().unwrap();
@@ -147,6 +150,7 @@ fn nist_sha1_short_kat() {
     }
 }
 
+#[cfg(feature = "allow-non-fips")]
 #[test]
 fn nist_sha1_long_kat() {
     load_tests().unwrap();
