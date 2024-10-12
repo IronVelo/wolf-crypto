@@ -1,6 +1,6 @@
 [package]
 name = "wolf-crypto"
-version = "0.1.0-alpha.12"
+version = "0.1.0-alpha.13"
 edition = "2021"
 license = "GPL-2.0-only"
 categories = ["no-std", "no-std::no-alloc", "cryptography"]
@@ -28,7 +28,7 @@ llvm-assume = []
 default = ["can-panic", "allow-non-fips"]
 
 [dependencies]
-wolf-crypto-sys = { version = "0.1.0-alpha.3" }
+wolf-crypto-sys = { version = "0.1.0-alpha.4" }
 # wolf-crypto-sys = { path = "../wolf-crypto-sys" }
 zeroize = { version = "1.8.1" }
 embedded-io = { version = "0.6.1", optional = true }
@@ -52,6 +52,8 @@ hex-literal = "0.4.1"
 hex = "0.4.3"
 poly1305 = "0.8.0"
 hmac = "0.12.1"
+pbkdf2 = { version = "0.12.2", features = ["hmac"] }
+hkdf = "0.12.4"
 
 [[bench]]
 name = "aes-gcm"
