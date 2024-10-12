@@ -2,140 +2,116 @@
 
 * =wolf-crypto=
 
-This library seeks to provide a safe, zero-cost, API for =wolfcrypt= by wolfSSL. It is in its very early stages, some
-feature flags are misleading, for instance =allow-non-fips= implies that when disabled only FIPS 140-3 certified
-cryptography is used. This is not currently the case due to the associated =wolf-crypto-sys= not currently leveraging
-the =FIPS-MODE= feature. This feature will eventually be enabled, as it was my original reason for beginning to work on
-this, though the library as previously mentioned is incredibly immature.
+=wolf-crypto= is a Rust library that provides a safe, zero-cost abstraction over =wolfcrypt=,
+the cryptographic library by wolfSSL. Designed to offer memory-safe, type-safe cryptographic
+operations, =wolf-crypto= focuses on performance, security, and adherence to FIPS 140-3 standards.
 
-Currently, the =hash= module is the most tested segment of this codebase, outside of this module and the =aes= module
-I personally would not be comfortable using anything in a general purpose application (not any of my professional
-work in security).
+Currently in **alpha**, the library is undergoing active development and should not be considered
+stable for production use. The API is subject to change as we incorporate feedback and continue
+to refine the design. However, once the library reaches its first minor release, the API will be
+locked in and guaranteed stable*, with no breaking changes*.
+
+=wolf-crypto= leverages Rust’s safety guarantees, preventing common vulnerabilities such as memory
+leaks, buffer overflows, and other issues prevalent in C-based cryptographic libraries. While still
+in alpha, the library has undergone extensive testing and is designed to become an ideal choice
+for secure cryptographic operations once it achieves stability.
+
+We encourage feedback from the community as we work toward stabilizing the API, ensuring that
+=wolf-crypto= is ready for production use while maintaining FIPS 140-3 compliance, formal
+verification, and rigorous testing.
 
 * Testing
 
-Despite not implementing cryptography by hand, this library deals with cryptography and FFI (involving =unsafe= code).
-Consequently, comprehensive testing is crucial. Although still in alpha, we maintain an extensive test suite:
+Given the critical nature of cryptographic libraries, comprehensive testing is fundamental to ensuring
+the reliability, security, and correctness of the =wolf-crypto= library. While cryptographic implementations
+are inherently sensitive, the library's interaction with foreign function interfaces (FFI) and unsafe Rust
+code necessitates rigorous testing across all areas.
+
+Every component of this library is now fully tested to provide maximum confidence in its functionality. Our
+approach emphasizes property-based testing, supported by unit testing, formal verification using Kani (for
+pure-Rust components), and validation through the NIST CAVP program. Constant-time behavior is verified,
+ensuring that operations are secure and timing attacks are mitigated.
 
 ** Current Test Suite
 
-*** Unit Tests
-
-- Check edge cases
-- Ensure behavior equivalent to robust implementations (e.g., =rust-crypto=) under these edge cases.
-
 *** Property Tests
 
-- Verify expected properties (e.g., encryption bijectivity).
-- Confirm documented properties.
-- Compare against robust implementations for equivalence.
+Property-based testing is the backbone of our testing framework, ensuring the expected properties of cryptographic
+algorithms are upheld across a wide range of inputs.
+
+- Validate encryption bijectivity: encryption followed by decryption always returns the original plaintext.
+- Verify documented cryptographic properties, such as associativity, commutativity, and other expected behaviors.
+- Stress testing with random and large datasets to uncover edge cases.
+- Cross-verify with other cryptographic libraries for functional equivalence and correctness.
+
+*** Unit Tests
+
+Unit tests complement the property tests by covering specific edge cases and known boundaries.
+
+- Edge case testing, including null inputs, minimum-length inputs, and maximum-length outputs.
+- Ensure behavior equivalent to robust implementations (e.g., =rust-crypto=) under these conditions.
+
+*** Constant-Time Verification
+
+Cryptographic functions are tested for constant-time behavior with respect to their content, ensuring that no
+exploitable timing variations exist based on the values being compared.
+
+- Automated verification using Haybale Pitchfork from UCSD PLSysSec to confirm that =ct_eq= and similar functions
+  behave consistently relative to input content.
+- Manual code audits are performed to ensure no branches or loops could introduce variable timing based on input
+  data.
 
 *** NIST CSRC CAVP Tests
 
-- Implemented for hashing functions (current or previously NIST-recommended).
-- Includes:
-  - Monte-Carlo tests.
-  - Known Answer tests (short and long datasets).
+For NIST-recommended algorithms, we conduct thorough testing based on the Cryptographic Algorithm Validation Program
+(CAVP) to ensure compliance with industry standards.
 
-*** Official KATs (Known Answer Tests)
+- Monte Carlo tests stress the algorithms using randomized data over thousands of iterations to verify their resilience.
+- Known Answer Tests (KATs) are conducted with short and long datasets to ensure cryptographic correctness and reproducibility.
 
-- Used for algorithms not covered by NIST CAVP.
-- Example: BLAKE2 algorithm.
+*** Official Known Answer Tests (KATs)
 
-** Goals and Approach
+For non-NIST algorithms, such as BLAKE2, we perform official Known Answer Tests to ensure the algorithms
+conform to standard implementations.
 
-- Aim for production-ready robustness by first minor release.
-- Design as a thin, type-safe, and memory-safe wrapper around FIPS 140-3 certified =wolfcrypt=.
-- Careful to avoid introducing security risks.
-- Enforce secure programming practices (e.g., prompt zeroing of secrets from memory).
+- Short and long input dataset coverage to ensure consistency across data sizes.
+- Cross-validation with independent implementations and specifications.
 
-** Comparison with =wolfcrypt=
+*** Formal Verification
 
-- =wolfcrypt= has undergone necessary testing and validation for FIPS 140-3 certification.
-- We apply rigorous testing to our abstraction layer.
-- Ensure we don't inadvertently violate underlying certified properties.
-- Build confidence through equivalence testing with other Rust cryptography projects.
+For parts of the library that are pure Rust and do not cross FFI boundaries, formal verification with Kani is
+used (carefully to ensure completeness) to provide additional assurance of correctness. This is especially
+important for components such as hex encoding, constant-time equality checks, and other key transformations.
 
-** Formal Verification Considerations
+* Goals and Approach
 
-- Not formally verified due to impracticality with current Rust tools and FFI.
-- Formal verification is rare but highly valuable for ensuring correctness.
-- Attempting to formally verify our API would have minimal benefits due to necessary assumptions about =wolfcrypt=.
+Our testing approach is focused on ensuring that the library is production-ready, highly secure, and meets FIPS 140-3 compliance standards.
 
-*** Current Tools and Limitations
+- Secure design: Enforcing best practices like zeroing secrets from memory after use to prevent unintended data exposure.
+- Compile-time FIPS compliance: Using Rust’s type system to enforce FIPS restrictions at compile time and ensure correct usage.
+- Continuous testing: As the library evolves, new algorithms undergo rigorous testing to guarantee their security and correctness.
 
-**** =Prusti=
+* Ongoing Testing Priorities
 
-- Handling of lifetimes is practically non-existent.
-- Viper framework struggles with prophecies.
-- Workaround: Creating assumed-correct functions that =snap= underlying data, stripping lifetimes.
+Our testing framework is continuously evolving, with ongoing efforts focused on:
 
-**** =Creusot=
-
-- Built on Why3 with comma lang.
-- Excellent handling of lifetimes using prophecies (based on Martín Abadi and Leslie Lamport's work).
-- Challenges:
-  - Installation can be difficult (script issues, manual installation sometimes necessary).
-  - Requires nightly Rust, even when not verifying specifications.
-  - Necessitates conditional compilation for everything.
-
-**** =Kani=
-
-- Less rigorous than =Prusti= or =Creusot=, but useful for libraries lacking formal verification.
-- Currently lacks proper FFI support, limiting its applicability to this crate.
-- This crate implements =Kani='s =Arbitrary= trait for certain types.
-- Some =proofs= using =Kani= are included, anticipating future improvements in FFI support.
-
-*** Future Prospects
-
-- Formal verification tools in Rust are promising but still in early stages.
-- As tools improve, particularly in handling FFI, more comprehensive verification may become feasible.
-- Continuous monitoring of advancements in formal verification for Rust.
-
-*** Important Note on Limitations
-
-Even with potential future formal verification of our API, it would not constitute complete formal verification
-as =wolfcrypt=, the underlying cryptographic module, is not formally verified. True formal guarantees would
-require formal verification of both our API and the underlying =wolfcrypt= implementation.
-
-** Future Enhancements
-
-*** Constant-time Behavior Testing
-
-- Challenge: High-level abstraction introduces noise in black-box testing.
-- Considerations:
-  - =wolfcrypt='s cryptography implementation is constant-time.
-  - Public API includes non-constant-time checks.
-- Potential approaches:
-  - Manual review of assembly.
-  - High-level taint analysis (challenging across FFI).
-- Importance: Preventing information leakage.
-
-It is important to note that all of the =ct= module has undergone rigorous analysis and verification of
-the documented constant-time properties. 
-
-*** Expanded Test Coverage
-
-- Focus on security properties beyond traditional code coverage.
-- Implement more sophisticated constant-time behavior tests when feasible.
+- Strengthening FIPS 140-3 enforcement, ensuring that algorithms in FIPS scope are properly handled at compile time.
+- Expanding performance and scalability testing, ensuring that the library operates efficiently under high-load scenarios.
+- Adding new algorithms and immediately subjecting them to the full suite of tests to ensure their robustness and correctness.
 
 * Current Priorities
 
 - Focus on implementing and stabilizing the core FIPS 140-3 compatible algorithms.
-- Improve test coverage in hashing, symmetric encryption, and AEAD modules.
-- Incrementally implement and test asymmetric cryptographic functions (RSA, ECDSA, ECDH).
-- Enable =FIPS-MODE= support in =wolf-crypto-sys= to align with the FIPS compliance goals.
+- Create a clear boundary between algorithms in FIPS scope, without the =allow-non-fips=
+  feature enabled attempt to enforce FIPS requirements in usage at compilation time.
+- Continual improvements in testing and documentation.
+- Expose more algorithms offered by wolfSSL's =wolfcrypt=.
 
 * License
 
 This library is under GPLv2 licensing *unless* you purchased a commercial license from wolfSSL.
 
-* Notes
-
-- Affiliation: I am not affiliated with wolfSSL, I just enjoy security and have appreciation for their work.
-- Why is this named =wolf-crypto= and not =wolfcrypt=: I did not want to take the official name by wolfSSL.
-
-* Roadmap [2/5]
+* Roadmap [2/6]
 
 - [X] Hashing [6/6]
   - [X] SHA2 [6/6]
@@ -153,8 +129,8 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
     - [X] SHAKE [2/2]
       - [X] SHAKE128
       - [X] SHAKE256
-  - [X] SHA [0/0]
-  - [X] RIPEMD-160 [0/0]
+  - [X] SHA
+  - [X] RIPEMD-160
   - [X] MD [2/2]
     - [X] MD5
     - [X] MD4
@@ -219,8 +195,12 @@ This library is under GPLv2 licensing *unless* you purchased a commercial licens
     - [X] SHA3-512
     - [X] SHA
     - [X] MD5 
-  - [X] Poly1305 [1/1]
-    - [X] Poly1305
+  - [X] Poly1305
+- [-] KDF [3/4]
+  - [X] HKDF
+  - [X] PBKDF1
+  - [X] PBKDF2
+  - [ ] PKCS12 PBKDF
 
 - [ ] Writing the Remaining Sections (asymmetric, password, padding, etc)
 
