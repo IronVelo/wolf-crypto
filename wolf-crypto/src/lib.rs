@@ -196,3 +196,6 @@ pub(crate) const fn to_u32(num: usize) -> Option<u32> {
 pub(crate) const fn to_u32(num: usize) -> Option<u32> {
     Some(num as u32)
 }
+
+/// Marker Trait for Algorithms and Configurations which are FIPS compliant.
+pub trait Fips: sealed::FipsSealed {}

@@ -5,6 +5,8 @@ use wolf_crypto_sys::{
     wc_Sha512_256Copy
 };
 
+mark_fips! { Sha512_256, Sealed }
+
 make_api! {
     name: Sha512_256,
     wc: wc_Sha512_256,

@@ -17,7 +17,7 @@ non_fips! {
 }
 
 use algo::GenericKey;
-use crate::ct;
+use crate::{ct, Fips};
 
 use wolf_crypto_sys::{
     Hmac as wc_Hmac,
@@ -450,6 +450,9 @@ impl<H: algo::Hash> Drop for Hmac<H> {
 // are also Send + Sync due to our configuration again.
 unsafe impl<H: algo::Hash> Send for Hmac<H> {}
 unsafe impl<H: algo::Hash> Sync for Hmac<H> {}
+
+impl<H: algo::Hash + Fips> crate::sealed::FipsSealed for Hmac<H> {}
+impl<H: algo::Hash + Fips> Fips for Hmac<H> {}
 
 #[cfg(test)]
 mod property_tests {

@@ -424,7 +424,7 @@ fn encode_byte(byte: u8, output: &mut [u8]) {
     of arbitrary length without needing to verify all possible inputs exhaustively.
 */
 
-/// Constant-time Hex Encoding
+/// Constant-Time Hex Encoding
 ///
 /// # Arguments
 ///
@@ -559,7 +559,7 @@ pub fn hex_encode(input: &[u8], output: &mut [u8]) -> Result<usize, InvalidSize>
     Ok(hex_len)
 }
 
-/// Constant-time Hex Encoding to a `&str`
+/// Constant-Time Hex Encoding to a `&str`
 ///
 /// # Arguments
 ///
@@ -624,6 +624,7 @@ alloc! {
     ///
     /// assert!(ct_eq(b"hello world", decoded));
     /// ```
+    #[allow(clippy::missing_panics_doc)] // this is infallible.
     pub fn hex_encode_alloc(input: &[u8]) -> alloc::string::String {
         let mut output = vec![0u8; hex_encode_len(input.len())];
         hex_encode(input, output.as_mut_slice()).unwrap(/* Infallible */);

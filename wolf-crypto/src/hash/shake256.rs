@@ -5,6 +5,8 @@ use wolf_crypto_sys::{
     wc_Shake256_Copy
 };
 
+mark_fips! { Shake256, Sealed }
+
 shake_api! {
     name: Shake256,
     wc: wc_Shake,

@@ -232,3 +232,25 @@ macro_rules! ensure {
         }
     };
 }
+
+macro_rules! mark_fips {
+    ($for:ident $(, $sealed:ident)?) => {
+        mark_fips! { @seal_no_ty $for $(, $sealed)? }
+        impl $crate::Fips for $for {}
+    };
+    (@seal_no_ty $for:ident, $sealed:ident) => {
+        impl $crate::sealed::FipsSealed for $for {}
+    };
+    (@seal_no_ty $for:ident) => {};
+    ($for:ident <$($lt:lifetime,)+ $($generic:ident),*> $(, $sealed:ident)?) => {
+        mark_fips!{ @seal $for $($sealed)? $($lt,)* $($generic, )* }
+        impl <$($lt,)* $($generic : $crate::Fips),* >
+        $crate::Fips for $for <$($lt,)* $($generic),* > {}
+    };
+    (@seal $name:ident $sealed:ident $($tt:tt)*) => {
+       impl <$($tt)*> $crate::sealed::FipsSealed for $name <$($tt)*> {}
+    };
+    (@seal $name:ident $($tt:tt)*) => {
+       impl <$($tt)*> $crate::sealed::$sealed for $name <$($tt)*> {}
+    }
+}

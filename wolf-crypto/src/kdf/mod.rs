@@ -228,13 +228,15 @@ pub mod salt {
         Min16 => 16 => InvalidSize
     }
 
+    mark_fips! { Min16, Sealed }
+
     /// A [`Salt`] with runtime flexibility.
     ///
     /// The [`Salt`] trait, with its associated constraints, is implemented for most common types
     /// which meet the marker constraint for pure compile-time checks. However, this can be
     /// limiting, this type moves these compile-time checks to runtime.
     #[repr(transparent)]
-    pub struct Slice<'s, SZ: MinSize> {
+    pub struct Slice<'s, SZ> {
         raw: &'s [u8],
         _min_size: PhantomData<SZ>
     }
@@ -636,7 +638,6 @@ impl<T: Salt<salt::Empty>> Salt<salt::Empty> for Option<T> {
     }
 }
 
-
 /// A [`salt::Slice`] which meets the FIPS requirement (128 bits) in length.
 pub type FipsSaltSlice<'s> = salt::Slice<'s, salt::Min16>;
 /// A [`salt::Slice`] which must not be empty.
@@ -664,6 +665,9 @@ pub type DynSaltSlice<'s> = FipsSaltSlice<'s>;
 ///   FIPS minimum requirement of 128 bits.
 /// - In non-FIPS mode (`allow-non-fips` is enabled), this type allows more relaxed salt constraints.
 pub type DynSaltSlice<'s> = SaltSlice<'s>;
+
+impl<T: Salt<salt::Min16>> crate::sealed::FipsSealed for T {}
+impl<T: Salt<salt::Min16>> crate::Fips for T {}
 
 #[cfg(test)]
 mod foolery {

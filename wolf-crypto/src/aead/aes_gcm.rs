@@ -403,6 +403,8 @@ impl AesGcm {
     }
 }
 
+mark_fips! { AesGcm, Sealed }
+
 impl Drop for AesGcm {
     fn drop(&mut self) {
         unsafe {

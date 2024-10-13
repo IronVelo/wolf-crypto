@@ -419,6 +419,8 @@ unsafe impl Send for AesCtr {}
 // underlying AES instance require a mutable reference, thus making this safe to mark `Sync`.
 unsafe impl Sync for AesCtr {}
 
+mark_fips! { AesCtr, Sealed }
+
 #[cfg(all(test, feature = "can-panic"))]
 mod tests {
     use ctr::Ctr128BE;

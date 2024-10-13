@@ -5,6 +5,8 @@ use wolf_crypto_sys::{
     wc_Sha224Copy
 };
 
+mark_fips! { Sha224, Sealed }
+
 make_api! {
     name: Sha224,
     wc: wc_Sha224,

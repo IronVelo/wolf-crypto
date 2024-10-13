@@ -13,6 +13,7 @@ use crate::sealed::HmacDigestSealed as SealedDigest;
 
 use crate::buf::InvalidSize;
 use crate::can_cast_u32;
+use crate::Fips;
 
 non_fips! {
     use wolf_crypto_sys::{WC_MD5, WC_SHA};
@@ -403,11 +404,17 @@ macro_rules! make_algo_type {
         $name:ident,
         $sz:ident,
         $wc_ty:ident
+        $(, $fips_trait:ident)?
     )),* $(,)?) => {
         $(
             $(#[$meta])*
             pub struct $name;
             impl Sealed for $name {}
+            impl $crate::sealed::Sealed for $name {}
+            $(
+                impl $crate::sealed::FipsSealed for $name {}
+                impl $fips_trait for $name {}
+            )?
 
             impl Hash for $name {
                 type Digest = [u8; $sz::USIZE];
@@ -462,34 +469,34 @@ make_algo_type! {
 make_algo_type! {
     (
         /// The `SHA224` Hash Function Marker Type.
-        Sha224, U28, WC_SHA224
+        Sha224, U28, WC_SHA224, Fips
     ),
     (
         /// The `SHA256` Hash Function Marker Type.
-        Sha256, U32, WC_SHA256
+        Sha256, U32, WC_SHA256, Fips
     ),
     (
         /// The `SHA384` Hash Function Marker Type.
-        Sha384, U48, WC_SHA384
+        Sha384, U48, WC_SHA384, Fips
     ),
     (
         /// The `SHA512` Hash Function Marker Type.
-        Sha512, U64, WC_SHA512
+        Sha512, U64, WC_SHA512, Fips
     ),
     (
         /// The `SHA3-224` Hash Function Marker Type.
-        Sha3_224, U28, WC_SHA3_224
+        Sha3_224, U28, WC_SHA3_224, Fips
     ),
     (
         /// The `SHA3-256` Hash Function Marker Type.
-        Sha3_256, U32, WC_SHA3_256
+        Sha3_256, U32, WC_SHA3_256, Fips
     ),
     (
         /// The `SHA3-384` Hash Function Marker Type.
-        Sha3_384, U48, WC_SHA3_384
+        Sha3_384, U48, WC_SHA3_384, Fips
     ),
     (
         /// The `SHA3-512` Hash Function Marker Type.
-        Sha3_512, U64, WC_SHA3_512
+        Sha3_512, U64, WC_SHA3_512, Fips
     )
 }
