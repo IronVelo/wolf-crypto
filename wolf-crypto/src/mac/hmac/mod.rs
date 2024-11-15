@@ -30,6 +30,7 @@ use core::ptr::addr_of_mut;
 use crate::{can_cast_u32, const_can_cast_u32, Unspecified};
 use crate::buf::InvalidSize;
 use crate::mac::hmac::algo::Digest as _;
+use core::fmt;
 
 pub use digest::{Digest, HexDigest};
 
@@ -78,6 +79,14 @@ pub use digest::{Digest, HexDigest};
 pub struct Hmac<H: algo::Hash> {
     inner: wc_Hmac,
     _algo: PhantomData<H>
+}
+
+impl<H: algo::Hash> fmt::Debug for Hmac<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Hmac<")
+            .and_then(|_| H::write_alg_name(f))
+            .and_then(|_| f.write_str(">"))
+    }
 }
 
 impl<H: algo::Hash> Hmac<H> {

@@ -2,7 +2,7 @@
 
 use wolf_crypto_sys::{wc_PBKDF2};
 
-use crate::{can_cast_i32, const_can_cast_i32, Unspecified};
+use crate::{can_cast_i32, const_can_cast_i32, Fips, Unspecified};
 use crate::kdf::{Salt, Iters};
 
 #[cfg(feature = "allow-non-fips")]
@@ -12,6 +12,7 @@ use crate::kdf::salt::NonEmpty as MinSize;
 use crate::kdf::salt::Min16 as MinSize;
 
 use crate::mac::hmac::algo::Hash;
+use core::fmt;
 
 /// The minimum output key length as stated in [SP 800-132, Section 5][1].
 ///
@@ -180,6 +181,160 @@ pub fn pbkdf2<const KL: usize, H: Hash>(
         Err(Unspecified)
     }
 }
+
+use core::marker::PhantomData;
+use crate::kdf::salt::Min16;
+use crate::sealed::FipsSealed;
+
+/// A wrapper type enforcing FIPS compliance for PBKDF2 operations.
+///
+/// The `FipsPbkdf2` type ensures that PBKDF2 operations are performed using
+/// FIPS-compliant hash functions and salts at the type level.
+///
+/// If the `allow-non-fips` flag is disabled, the constraints the `FipsPbkdf2` struct enforces are
+/// equivalent to that of the [`pbkdf2`] and [`pbkdf2_into`] functions alone.
+///
+/// This type implements this crate's [`Fips`] marker type.
+///
+/// # Examples
+///
+/// ```rust
+/// use wolf_crypto::kdf::FipsPbkdf2;
+/// use wolf_crypto::hash::Sha256;
+/// use wolf_crypto::kdf::Iters;
+///
+/// let password = b"my password";
+/// let salt = [42; 16];
+/// let iters = Iters::new(100_000).unwrap();
+///
+/// let key = FipsPbkdf2::<Sha256>::array::<32>(password, salt, iters).unwrap();
+/// assert_eq!(key.len(), 32);
+/// ```
+///
+/// ```compile_fail
+/// # use wolf_crypto::kdf::FipsPbkdf2;
+/// # use wolf_crypto::hash::Sha256;
+/// # use wolf_crypto::kdf::Iters;
+/// #
+/// # let password = b"my password";
+/// let salt = [3; 8]; // won't compile! must be at least 16 bytes for FIPS compliance.
+/// # let iters = Iters::new(1_000).unwrap();
+/// # let mut out_key = [0u8; 32];
+///
+/// FipsPbkdf2::<Sha256>::into(password, salt, iters, &mut out_key).unwrap();
+/// ```
+#[derive(Copy, Clone)]
+pub struct FipsPbkdf2<H: Hash + Fips> {
+    _hash: PhantomData<H>
+}
+
+impl<H: Hash + Fips> fmt::Debug for FipsPbkdf2<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("FipsPbkdf2<")
+            .and_then(|_| H::write_alg_name(f))
+            .and_then(|_| f.write_str(">"))
+    }
+}
+
+impl<H: Hash + Fips> FipsPbkdf2<H> {
+    /// Performs PBKDF2 and returns the result as a fixed-size array.
+    ///
+    /// # Arguments
+    ///
+    /// * `password` - The password to use for the key derivation.
+    /// * `salt`     - The salt to use for key derivation.
+    /// * `iters`    - The number of times to process the hash.
+    ///
+    /// # Errors
+    ///
+    /// - The length of the `password` was greater than [`i32::MAX`].
+    /// - The length of the `salt` was greater than [`i32::MAX`].
+    /// - The number of `iters` was greater than [`i32::MAX`].
+    /// - The `KL` generic was greater than [`i32::MAX`].
+    /// - The `KL` generic was less than [`FIPS_MIN_KEY`] (14 bytes).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::kdf::{FipsPbkdf2, Sha256, Iters};
+    ///
+    /// type Sha256Pbkdf2 = FipsPbkdf2<Sha256>;
+    ///
+    /// let password = b"my secret password";
+    /// let salt = [42; 16];
+    /// let iters = Iters::new(600_000).unwrap();
+    ///
+    /// let key = Sha256Pbkdf2::array::<32>(password, salt, iters).unwrap();
+    /// assert_eq!(key.len(), 32);
+    /// ```
+    #[inline]
+    pub fn array<const KL: usize>(
+        password: &[u8],
+        salt: impl Salt<Min16>,
+        iters: Iters
+    ) -> Result<[u8; KL], Unspecified> {
+        #[cfg(feature = "allow-non-fips")] {
+            // this is already checked if allow-non-fips is disabled.
+            if KL < FIPS_MIN_KEY { return Err(Unspecified) }
+        }
+        pbkdf2::<KL, H>(password, salt, iters)
+    }
+
+    /// Performs PBKDF2 and writes the result into the provided `out_key` buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `password` - The password to use for the key derivation.
+    /// * `salt`     - The salt to use for key derivation.
+    /// * `iters`    - The number of times to process the hash.
+    /// * `out_key`  - The buffer to write the generated key into.
+    ///
+    /// # Errors
+    ///
+    /// - The length of the `password` was greater than [`i32::MAX`].
+    /// - The length of the `salt` was greater than [`i32::MAX`].
+    /// - The number of `iters` was greater than [`i32::MAX`].
+    /// - The length of the `out_key` was greater than [`i32::MAX`].
+    /// - The length of the `out_key` was less than [`FIPS_MIN_KEY`] (14 bytes).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use wolf_crypto::kdf::{FipsPbkdf2, Sha256, Iters};
+    ///
+    /// type Sha256Pbkdf2 = FipsPbkdf2<Sha256>;
+    ///
+    /// let password = b"my secret password";
+    /// let salt = [42; 16];
+    /// let iters = Iters::new(600_000).unwrap();
+    /// let mut out_key = [0u8; 32];
+    ///
+    /// Sha256Pbkdf2::into(password, salt, iters, out_key.as_mut_slice()).unwrap();
+    /// ```
+    #[inline]
+    pub fn into(
+        password: &[u8],
+        salt: impl Salt<Min16>,
+        iters: Iters,
+        out_key: &mut [u8]
+    ) -> Result<(), Unspecified> {
+        #[cfg(feature = "allow-non-fips")] {
+            // this is already checked if allow-non-fips is disabled.
+            if out_key.len() < FIPS_MIN_KEY { return Err(Unspecified) }
+        }
+
+        pbkdf2_into::<H>(password, salt, iters, out_key)
+    }
+
+    #[cfg(test)]
+    const fn new() -> Self {
+        Self { _hash: PhantomData }
+    }
+}
+
+impl<H: Hash + Fips> FipsSealed for FipsPbkdf2<H> {}
+impl<H: Hash + Fips> Fips for FipsPbkdf2<H> {}
+
 
 non_fips! {
     use wolf_crypto_sys::wc_PBKDF1;
@@ -384,6 +539,11 @@ mod tests {
         let mut out = [0u8; 13];
         assert!(pbkdf2::<13, Sha256>(b"hello world", [0u8; 16], Iters::new(100).unwrap()).is_err());
         assert!(pbkdf2_into::<Sha256>(b"hello world", [0u8; 16], Iters::new(100).unwrap(), &mut out).is_err());
+    }
+
+    #[test]
+    fn fmt_fips_pbkdf2() {
+        assert_eq!(format!("{:?}", FipsPbkdf2::<Sha256>::new()), "FipsPbkdf2<Sha256>");
     }
 }
 

@@ -14,6 +14,7 @@ use crate::sealed::HmacDigestSealed as SealedDigest;
 use crate::buf::InvalidSize;
 use crate::can_cast_u32;
 use crate::Fips;
+use core::fmt;
 
 non_fips! {
     use wolf_crypto_sys::{WC_MD5, WC_SHA};
@@ -106,6 +107,9 @@ pub trait Hash : Sealed {
     /// 
     /// [1]: https://www.rfc-editor.org/rfc/rfc2104#section-3
     type KeyLen: KeySz;
+
+    /// Writes the algorithm name into `f`.
+    fn write_alg_name(f: &mut fmt::Formatter<'_>) -> fmt::Result;
 
     #[doc(hidden)]
     #[must_use]
@@ -419,6 +423,32 @@ macro_rules! make_algo_type {
             impl Hash for $name {
                 type Digest = [u8; $sz::USIZE];
                 type KeyLen = $sz;
+
+                #[doc = concat!("Writes \"", stringify!($name), "\" to `f`.")]
+                #[inline]
+                fn write_alg_name(f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str(stringify!($name))
+                }
+
+                #[inline]
+                fn type_id() -> ::core::ffi::c_int {
+                    // This is a silly assertion as the maximum constant for wc_ty is 13.
+                    debug_assert!($wc_ty <= i32::MAX as ::core::ffi::c_uint);
+                    $wc_ty as ::core::ffi::c_int
+                }
+            }
+
+            impl Sealed for $crate::hash::$name {}
+
+            impl Hash for $crate::hash::$name {
+                type Digest = [u8; $sz::USIZE];
+                type KeyLen = $sz;
+
+                #[doc = concat!("Writes \"", stringify!($name), "\" to `f`.")]
+                #[inline]
+                fn write_alg_name(f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str(stringify!($name))
+                }
 
                 #[inline]
                 fn type_id() -> ::core::ffi::c_int {

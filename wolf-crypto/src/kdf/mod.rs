@@ -16,7 +16,7 @@ non_fips! {
 
 pub mod pbkdf;
 #[doc(inline)]
-pub use pbkdf::{pbkdf2, pbkdf2_into};
+pub use pbkdf::{pbkdf2, pbkdf2_into, FipsPbkdf2};
 
 non_fips! {
     #[doc(inline)]
@@ -228,6 +228,11 @@ pub mod salt {
         Min16 => 16 => InvalidSize
     }
 
+    /// Implemented for salt constraints which must not be empty ([`NonEmpty`] + [`Min16`]).
+    pub trait NonEmptySize<SZ: MinSize> : Salt<SZ> {}
+    impl<S: Salt<NonEmpty>> NonEmptySize<NonEmpty> for S {}
+    impl<S: Salt<Min16>> NonEmptySize<Min16> for S {}
+
     mark_fips! { Min16, Sealed }
 
     /// A [`Salt`] with runtime flexibility.
@@ -403,7 +408,6 @@ pub mod salt {
     impl_salt_slice! { Empty allows Min16 }
 
     impl_salt_slice! { NonEmpty allows NonEmpty }
-    impl_salt_slice! { NonEmpty allows Min16 }
 
     impl_salt_slice! { Min16 allows Min16 }
 }
@@ -442,6 +446,33 @@ pub trait Salt<SZ: salt::MinSize>: Sealed {
     #[doc(hidden)]
     #[must_use]
     fn ptr(&self) -> *const u8;
+}
+
+impl<T: Salt<salt::Min16>> Salt<salt::NonEmpty> for T {
+    #[inline]
+    fn size(&self) -> u32 {
+        <T as Salt<salt::Min16>>::size(self)
+    }
+
+    #[inline]
+    fn is_valid_size(&self) -> bool {
+        <T as Salt<salt::Min16>>::is_valid_size(self)
+    }
+
+    #[inline]
+    fn i_size(&self) -> i32 {
+        <T as Salt<salt::Min16>>::i_size(self)
+    }
+
+    #[inline]
+    fn i_is_valid_size(&self) -> bool {
+        <T as Salt<salt::Min16>>::i_is_valid_size(self)
+    }
+
+    #[inline]
+    fn ptr(&self) -> *const u8 {
+        <T as Salt<salt::Min16>>::ptr(self)
+    }
 }
 
 impl Salt<salt::Empty> for &[u8] {
@@ -517,6 +548,18 @@ macro_rules! impl_salt_for_sizes {
                 #[inline]
                 fn ptr(&self) -> *const u8 { self.as_ptr() }
             }
+            impl Salt<$constraint> for &[u8; $sz] {
+                #[inline]
+                fn size(&self) -> u32 { $sz }
+                #[inline]
+                fn is_valid_size(&self) -> bool { true }
+                #[inline]
+                fn i_size(&self) -> i32 { $sz }
+                #[inline]
+                fn i_is_valid_size(&self) -> bool { true }
+                #[inline]
+                fn ptr(&self) -> *const u8 { self.as_ptr() }
+            }
         )*
     };
 }
@@ -526,8 +569,7 @@ impl_salt_for_sizes! { salt::Min16 => [
 ]}
 
 impl_salt_for_sizes! { salt::NonEmpty => [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 48, 64
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 ]}
 
 impl Salt<salt::Empty> for () {
@@ -557,57 +599,57 @@ impl Salt<salt::Empty> for () {
     }
 }
 
-impl<T: Salt<SZ>, SZ: salt::MinSize> Salt<SZ> for &T {
+impl<T: Salt<salt::Empty>> Salt<salt::Empty> for &T {
     #[inline]
     fn size(&self) -> u32 {
-        <T as Salt<SZ>>::size(self)
+        <T as Salt<salt::Empty>>::size(self)
     }
 
     #[inline]
     fn is_valid_size(&self) -> bool {
-        <T as Salt<SZ>>::is_valid_size(self)
+        <T as Salt<salt::Empty>>::is_valid_size(self)
     }
 
     #[inline]
     fn i_size(&self) -> i32 {
-        <T as Salt<SZ>>::i_size(self)
+        <T as Salt<salt::Empty>>::i_size(self)
     }
 
     #[inline]
     fn i_is_valid_size(&self) -> bool {
-        <T as Salt<SZ>>::i_is_valid_size(self)
+        <T as Salt<salt::Empty>>::i_is_valid_size(self)
     }
 
     #[inline]
     fn ptr(&self) -> *const u8 {
-        <T as Salt<SZ>>::ptr(self)
+        <T as Salt<salt::Empty>>::ptr(self)
     }
 }
 
-impl<T: Salt<SZ>, SZ: salt::MinSize> Salt<SZ> for &mut T {
+impl<T: Salt<salt::Empty>> Salt<salt::Empty> for &mut T {
     #[inline]
     fn size(&self) -> u32 {
-        <T as Salt<SZ>>::size(self)
+        <T as Salt<salt::Empty>>::size(self)
     }
 
     #[inline]
     fn is_valid_size(&self) -> bool {
-        <T as Salt<SZ>>::is_valid_size(self)
+        <T as Salt<salt::Empty>>::is_valid_size(self)
     }
 
     #[inline]
     fn i_size(&self) -> i32 {
-        <T as Salt<SZ>>::i_size(self)
+        <T as Salt<salt::Empty>>::i_size(self)
     }
 
     #[inline]
     fn i_is_valid_size(&self) -> bool {
-        <T as Salt<SZ>>::i_is_valid_size(self)
+        <T as Salt<salt::Empty>>::i_is_valid_size(self)
     }
 
     #[inline]
     fn ptr(&self) -> *const u8 {
-        <T as Salt<SZ>>::ptr(self)
+        <T as Salt<salt::Empty>>::ptr(self)
     }
 }
 

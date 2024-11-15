@@ -23,7 +23,6 @@
 //! This library is currently in alpha. As such, there is no guarantee of API stability
 //! across any update. This crate follows semantic versioning.
 
-
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 #![warn(
@@ -199,3 +198,38 @@ pub(crate) const fn to_u32(num: usize) -> Option<u32> {
 
 /// Marker Trait for Algorithms and Configurations which are FIPS compliant.
 pub trait Fips: sealed::FipsSealed {}
+
+/// Ensure the Provided Type is in FIPS scope.
+///
+/// This is a simple no-op, allowing to guard against non-fips compliant algorithms and
+/// configurations at compilation time.
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::mac::hmac::{Hmac, Sha256, algo::Hash};
+/// use wolf_crypto::ensure_fips;
+///
+/// macro_rules! fips_hmac {
+///     ($algo:ty, $($key:tt)*) => {{
+///         ensure_fips::<Hmac<$algo>>();
+///         Hmac::<$algo>::new($($key)*)
+///     }}
+/// }
+///
+/// let mut mac = fips_hmac!(Sha256, [42; 32]);
+/// ```
+///
+/// ```compile_fail
+/// # use wolf_crypto::mac::hmac::{Hmac, Md5, algo::Hash};
+/// # use wolf_crypto::ensure_fips;
+/// #
+/// # macro_rules! fips_hmac {
+/// #     ($algo:ty, $($key:tt)*) => {{
+/// #         ensure_fips::<Hmac<$algo>>();
+/// #         Hmac::<$algo>::new($($key)*)
+/// #     }}
+/// # }
+/// let mut mac = fips_hmac!(Md5, [42; 16]); // does not compile!
+/// ```
+pub const fn ensure_fips<F: Fips>() {}
