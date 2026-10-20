@@ -1,8 +1,8 @@
 //! Optional Verus-verified layer over wolf-crypto.
 //!
 //! Prototype: AES-GCM with a proved nonce-uniqueness discipline. See
-//! `VERUS.org` at the repository root for the design, the trusted base and
-//! the roadmap.
+//! `README.org` in this crate's directory for the design, the trusted base
+//! and the roadmap.
 //!
 //! Without Verus this crate builds as ordinary Rust: the `verus!` macro erases
 //! specifications, proofs and ghost state, leaving the executable code

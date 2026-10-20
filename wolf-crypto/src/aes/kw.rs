@@ -56,6 +56,18 @@
 //! let tampered = Wrapped::<32>::try_from(tampered.as_slice()).unwrap();
 //! assert!(kek.unwrap(&tampered).is_err());
 //! ```
+//!
+//! # Limitations
+//!
+//! In the vendored wolfCrypt (5.7.2), `wc_AesKeyUnWrap_ex` compares the recovered integrity
+//! check value with `XMEMCMP`, which is not constant time, and does not clear its stack
+//! temporary (the recovered `A` and the first plaintext semiblock) on return. An attacker who
+//! can submit many forged wrapped keys and time the unwrap learns at most the position of the
+//! first mismatching byte of the recovered `A`; this matters only for a service that unwraps
+//! attacker-supplied blobs at scale under a long-lived key-encryption key. [`Kek::unwrap`]
+//! zeroes its own output on every error. Later wolfCrypt releases use a constant-time
+//! comparison and clear the temporary; this section is removed when the vendored sources are
+//! updated.
 
 use core::ffi::{c_int, c_uint};
 use core::fmt;

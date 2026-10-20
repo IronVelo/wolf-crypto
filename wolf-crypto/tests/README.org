@@ -11,6 +11,10 @@ The destination for these files is in the =test-vectors= directory. If you wish 
 artifacts around you may delete this directory manually. It is not automatically cleaned up as again, these test
 suites are very large, and it takes around 8 seconds on my machine to load initially.
 
+The integration tests, their vectors and the fuzz targets are repository-only: they are excluded from the
+published package, so run them from a checkout of the repository. The unit tests and doc tests in =src/= ship
+with the package.
+
 For more information on this test suite, please see the relevant papers from NIST:
 
 - [[https://csrc.nist.gov/CSRC/media/Projects/Hash-Functions/documents/SHA3-KATMCT1.pdf][Description of Known Answer Test (KAT) and Monte Carlo Test (MCT) for SHA-3 Candidate Algorithm Submissions]]

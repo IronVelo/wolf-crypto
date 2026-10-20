@@ -15,7 +15,10 @@ exclude = [
     "*~",
     "*.bc",
     "*.ll",
-    "benches"
+    "benches",
+    "tests",
+    "fuzz",
+    "test-vectors"
 ]
 
 [features]
