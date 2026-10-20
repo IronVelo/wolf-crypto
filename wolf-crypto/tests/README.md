@@ -118,8 +118,10 @@ The tests cover:
 
 -   SigVer: every case verifies (`P`) or fails (`F`) as expected; a modified `Q` that is not a valid public key is
     rejected on import.
--   SigGen: the private key `d` derives the published `Q`, and the published signature verifies (the per-message
-    secret `k` cannot be injected through the API, so signature generation itself is covered by the property tests
-    against RustCrypto).
+-   SigGen: used for key derivation and verification, not for signing. Importing `d` derives the published `Q`, the
+    published signature `(R, S)` verifies for `Msg` under `Q` (from the message and from its digest) and fails for a
+    modified message, and its DER encoding roundtrips. Signing with the vector's `k` is not possible, as the API does
+    not accept a per-message secret, so the signatures produced by the crate are not compared with the vectors; they
+    are checked by the property tests, which verify them with RustCrypto.
 -   PKV: public key validation accepts exactly the valid keys.
 -   ECC CDH: importing `dIUT` derives `QIUT`, and the shared secret with `QCAVS` is `ZIUT`.

@@ -389,3 +389,22 @@ impl kani::Arbitrary for crate::buf::Nonce {
         crate::buf::Nonce::new(kani::any())
     }
 }
+
+/// Drop `value` in place and report whether the `Aes` inside it (located by `inner`) held
+/// non-zero bytes before the drop, and whether it holds any after.
+///
+/// The storage outlives the drop, so the bytes can still be read afterwards.
+pub fn aes_set_before_after_drop<T>(
+    value: T,
+    inner: fn(*mut T) -> *const wolf_crypto_sys::Aes
+) -> (bool, bool) {
+    let mut slot = core::mem::MaybeUninit::new(value);
+    let base = slot.as_mut_ptr();
+    let aes = inner(base).cast::<u8>();
+    let any_set = || (0..core::mem::size_of::<wolf_crypto_sys::Aes>())
+        .any(|i| unsafe { aes.add(i).read_volatile() } != 0);
+
+    let before = any_set();
+    unsafe { core::ptr::drop_in_place(base) };
+    (before, any_set())
+}

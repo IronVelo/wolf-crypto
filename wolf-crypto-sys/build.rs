@@ -53,6 +53,7 @@ fn main() {
         .clang_arg("-DECC_MIN_KEY_SZ=256")
         .clang_arg("-DECC_SHAMIR")
         .clang_arg("-DHAVE_AESGCM")
+        .clang_arg("-DHAVE_AES_DECRYPT")
         .clang_arg("-DWOLFSSL_AES_COUNTER")
         .clang_arg("-DWOLFSSL_AES_CBC_LENGTH_CHECKS")
         .clang_arg("-DWOLFSSL_SHA224")

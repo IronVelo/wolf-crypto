@@ -4,7 +4,8 @@ use libfuzzer_sys::fuzz_target;
 use wolf_crypto::ecc::{Curve, PublicKey, Signature, P256, P384};
 
 fn decode<C: Curve>(data: &[u8]) {
-    // only canonical DER is accepted, so whatever decodes must re-encode to the input.
+    // only canonical encodings are accepted (DER signatures, SubjectPublicKeyInfo and SEC1
+    // points), so whatever decodes must re-encode to the input.
     if let Ok(sig) = Signature::<C>::from_der(data) {
         assert_eq!(sig.to_der().unwrap().as_ref(), data);
     }

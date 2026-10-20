@@ -3,13 +3,13 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use wolf_crypto_sys::{
     Aes as AesLL,
-    wc_AesFree, wc_AesGcmDecrypt, wc_AesGcmEncrypt, wc_AesGcmSetKey
+    wc_AesGcmDecrypt, wc_AesGcmEncrypt, wc_AesGcmSetKey
 };
 use crate::buf::GenericIv;
 use crate::ptr::ConstPtr;
 use crate::{can_cast_u32, Unspecified};
 use crate::aead::{Aad, Tag};
-use crate::aes::{init_aes, Key};
+use crate::aes::{init_aes, free_aes, Key};
 use crate::opaque_res::Res;
 
 #[inline(always)]
@@ -411,11 +411,10 @@ impl Drop for AesGcm {
             // SAFETY:
             //
             // We are in the drop implementation, so we are never going to be using the
-            // `Aes` type again. Since we are configured to not malloc, this simply zeroes
-            // the secrets that were copied on `wc_AesSetKey` invocation. I wish there
-            // was a way to avoid the copying as I do not like secrets living in memory
-            // more than once, but I understand the decision to do this for ensuring safety.
-            wc_AesFree(addr_of_mut!(self.inner));
+            // `Aes` type again. `wc_AesFree` does not clear the key schedule copied in by
+            // `wc_AesGcmSetKey` (nor the GCM `H` and its tables) in our configuration,
+            // `free_aes` zeroes the whole struct after it.
+            free_aes(addr_of_mut!(self.inner));
         }
     }
 }
@@ -575,6 +574,16 @@ mod tests {
 
     fn find_dif_index(left: &[u8], right: &[u8]) -> Option<usize> {
         left.iter().zip(right.iter()).position(|(l, r)| l != r)
+    }
+
+    #[test]
+    fn drop_zeroes_key_schedule() {
+        let gcm = AesGcm::new(&Key::Aes256([0xa5; 32])).unwrap();
+        let (before, after) = crate::aes::test_utils::aes_set_before_after_drop(
+            gcm, |g| unsafe { core::ptr::addr_of!((*g).inner) }
+        );
+        assert!(before);
+        assert!(!after, "the key schedule survived the drop");
     }
 
     #[test]

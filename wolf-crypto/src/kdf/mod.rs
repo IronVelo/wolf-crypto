@@ -16,11 +16,11 @@ non_fips! {
 
 pub mod pbkdf;
 #[doc(inline)]
-pub use pbkdf::{pbkdf2, pbkdf2_into, FipsPbkdf2};
+pub use pbkdf::{pbkdf2, pbkdf2_into};
 
 non_fips! {
     #[doc(inline)]
-    pub use pbkdf::{pbkdf1, pbkdf1_into};
+    pub use pbkdf::{pbkdf1, pbkdf1_into, FipsPbkdf2};
 }
 
 #[doc(inline)]

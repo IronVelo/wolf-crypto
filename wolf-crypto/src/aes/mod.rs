@@ -26,7 +26,7 @@ pub mod test_utils;
 
 use wolf_crypto_sys::{
     Aes as AesLL,
-    wc_AesInit,
+    wc_AesInit, wc_AesFree,
     INVALID_DEVID, AES_ENCRYPTION,
 };
 
@@ -148,6 +148,22 @@ impl AesM {
     pub const fn mode(&self) -> core::ffi::c_uint {
         self.mode
     }
+}
+
+/// Free the `Aes` at `aes` and zero it, clearing the key schedule.
+///
+/// Without hardware or async back-ends, `wc_AesFree` only releases back-end resources, it does
+/// not clear the expanded key (`aes.c`, `wc_AesFree`), so the struct is zeroed afterwards.
+///
+/// # Safety
+///
+/// `aes` must point to an `Aes` initialized with `wc_AesInit`, which is not used afterwards.
+#[inline]
+pub(crate) unsafe fn free_aes(aes: *mut AesLL) {
+    wc_AesFree(aes);
+    // SAFETY: `Aes` is a flat C struct for which all zeroes is a valid value (null pointers,
+    // zero integers), and it is not used after this.
+    zeroize::zeroize_flat_type(aes);
 }
 
 #[cfg_attr(not(debug_assertions), inline(always))]

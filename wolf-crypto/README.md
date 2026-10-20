@@ -259,8 +259,16 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
 -   [-] KDF <code>[3/4]</code>
     -   [X] HKDF
     -   [X] PBKDF1
-    -   [X] PBKDF2
+    -   [X] PBKDF2 (`FipsPbkdf2` requires `allow-non-fips`, see below)
     -   [ ] PKCS12 PBKDF
+    
+    PBKDF2 (SP 800-132) is an algorithm in FIPS scope. `kdf::FipsPbkdf2` ensures that its
+    configuration meets SP 800-132's requirements: an HMAC PRF over a FIPS-approved hash, a salt of
+    at least 128 bits and a derived key of at least 112 bits (the iteration count is only required
+    to be non-zero; the recommended minimum of 1,000 is not enforced). It requires the
+    `allow-non-fips` feature and does not implement the `Fips` marker, because the current validated
+    wolfCrypt FIPS 140-3 module (certificate #5548, wolfCrypt 5.2.3) does not approve PBKDF2; a later
+    module may.
 
 -   [-] Asymmetric <code>[1/2]</code>
     -   [X] ECC (NIST prime curves) <code>[2/2]</code>
@@ -269,13 +277,13 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
             -   [X] Public key import / export (uncompressed SEC1, SubjectPublicKeyInfo DER),
                 with full public-key validation
             -   [X] ECDH (SP 800-56A ECC CDH primitive, ephemeral-unified)
-            -   [X] ECDSA with SHA-256 (raw r||s and DER signatures)
+            -   [X] ECDSA with SHA-256 (digests typed to the curve, raw r||s and DER signatures)
         -   [X] P-384 <code>[4/4]</code>
             -   [X] Key generation, private key import / export
             -   [X] Public key import / export (uncompressed SEC1, SubjectPublicKeyInfo DER),
                 with full public-key validation
             -   [X] ECDH (SP 800-56A ECC CDH primitive, ephemeral-unified)
-            -   [X] ECDSA with SHA-384 (raw r||s and DER signatures)
+            -   [X] ECDSA with SHA-384 (digests typed to the curve, raw r||s and DER signatures)
     -   [ ] Remaining asymmetric algorithms (not yet scoped)
 
 -   [ ] Writing the Remaining Sections (password, padding, etc)

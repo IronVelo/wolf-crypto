@@ -15,11 +15,120 @@ use crate::buf::InvalidSize;
 use crate::{can_cast_u32, Fips};
 use crate::sealed::FipsSealed;
 
+/// The digest signed and verified with ECDSA on the curve `C`: the output of the hash function
+/// tied to the curve, SHA-256 for [`P256`](crate::ecc::P256) and SHA-384 for
+/// [`P384`](crate::ecc::P384).
+///
+/// A `Prehash` is computed from the message ([`digest`](Self::digest)) or from the crate's
+/// hasher of that function ([`from_hasher`](Self::from_hasher)), so a digest of another hash
+/// function cannot be passed by mistake. Bytes computed elsewhere (for example received from a
+/// remote signer protocol) must be wrapped explicitly with
+/// [`assume_digest`](Self::assume_digest).
+///
+/// # Example
+///
+/// ```
+/// use wolf_crypto::{ecc::{Prehash, P256}, hash::Sha256};
+///
+/// let mut hasher = Sha256::new().unwrap();
+/// assert!(hasher.try_update(b"hello ").is_ok());
+/// assert!(hasher.try_update(b"world").is_ok());
+///
+/// let streamed = Prehash::<P256>::from_hasher(hasher).unwrap();
+/// assert_eq!(streamed, Prehash::<P256>::digest(b"hello world").unwrap());
+/// ```
+pub struct Prehash<C: Curve> {
+    digest: C::Digest,
+    _curve: PhantomData<C>
+}
+
+impl<C: Curve> Prehash<C> {
+    /// Hash the message with the hash function tied to the curve.
+    ///
+    /// # Errors
+    ///
+    /// - The message is longer than `u32::MAX` bytes.
+    /// - The hash function failed.
+    #[inline]
+    pub fn digest(msg: &[u8]) -> Result<Self, Unspecified> {
+        C::digest(msg).map(Self::assume_digest)
+    }
+
+    /// Finalize a hasher of the hash function tied to the curve (`C::Hasher`), consuming it.
+    ///
+    /// # Errors
+    ///
+    /// If the hasher failed to finalize.
+    #[inline]
+    pub fn from_hasher(hasher: C::Hasher) -> Result<Self, Unspecified> {
+        C::finalize(hasher).map(Self::assume_digest)
+    }
+
+    /// Wrap a digest computed outside this crate.
+    ///
+    /// The caller asserts that `digest` is the SHA-256 (for [`P256`](crate::ecc::P256)) or
+    /// SHA-384 (for [`P384`](crate::ecc::P384)) digest of the message being signed or
+    /// verified. This is not, and cannot be, checked: signing anything else (for example a
+    /// truncated digest of another function, or attacker-chosen bytes) breaks the security of
+    /// ECDSA. Prefer [`digest`](Self::digest) or [`from_hasher`](Self::from_hasher).
+    #[inline]
+    #[must_use]
+    pub const fn assume_digest(digest: C::Digest) -> Self {
+        Self { digest, _curve: PhantomData }
+    }
+
+    /// The digest bytes.
+    #[inline]
+    #[must_use]
+    pub const fn as_bytes(&self) -> &C::Digest {
+        &self.digest
+    }
+}
+
+impl<C: Curve> Clone for Prehash<C> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C: Curve> Copy for Prehash<C> {}
+
+impl<C: Curve> PartialEq for Prehash<C> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.digest.as_ref() == other.digest.as_ref()
+    }
+}
+
+impl<C: Curve> Eq for Prehash<C> {}
+
+impl<C: Curve> fmt::Debug for Prehash<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Prehash<")?;
+        f.write_str(C::NAME)?;
+        f.write_str(">(")?;
+        for b in self.digest.as_ref() { write!(f, "{b:02x}")?; }
+        f.write_str(")")
+    }
+}
+
+impl<C: Curve + Fips> FipsSealed for Prehash<C> {}
+impl<C: Curve + Fips> Fips for Prehash<C> {}
+
 /// A raw ECDSA signature for the curve `C`: the big-endian integers `r || s`, each `C::SIZE`
 /// bytes.
 ///
 /// A `Signature` is not checked on construction, `r` and `s` out of the range `[1, n - 1]`
 /// simply fail verification.
+///
+/// # Malleability
+///
+/// ECDSA signatures are malleable: if `(r, s)` is a valid signature of a message, so is
+/// `(r, n - s)`, and anyone can compute it from the first without the private key. A valid
+/// signature is therefore not a unique identifier of a signed message (do not use it, or its
+/// encoding, as one, for example to detect replays); verification only shows that the holder
+/// of the private key signed the message.
 pub struct Signature<C: Curve> {
     raw: C::RawSignature,
     _curve: PhantomData<C>
@@ -61,6 +170,10 @@ impl<C: Curve> Signature<C> {
     }
 
     /// Decode an ASN.1 DER `ECDSA-Sig-Value` (`SEQUENCE { r INTEGER, s INTEGER }`).
+    ///
+    /// Only the canonical (DER) encoding of `(r, s)` is accepted, with nothing after it. This is
+    /// a canonical encoding, not a unique signature: `(r, n - s)` has its own canonical encoding
+    /// and also verifies, see [malleability](Self#malleability).
     ///
     /// # Errors
     ///
@@ -237,11 +350,12 @@ impl<C: Curve + Fips> FipsSealed for DerSignature<C> {}
 impl<C: Curve + Fips> Fips for DerSignature<C> {}
 
 impl<C: Curve> PrivateKey<C> {
-    /// Sign a digest computed by the caller.
+    /// Sign a digest of the hash function tied to the curve (SHA-256 for
+    /// [`P256`](crate::ecc::P256), SHA-384 for [`P384`](crate::ecc::P384)), see [`Prehash`].
     ///
-    /// The digest must be the output of the hash function matching the curve, SHA-256 for
-    /// [`P256`](crate::ecc::P256) and SHA-384 for [`P384`](crate::ecc::P384), its size is
-    /// enforced by the type system. The per-message secret `k` is generated with the `rng`.
+    /// The per-message secret `k` is generated by `wolfcrypt` from the `rng` in the same way as
+    /// a private key (see [`PrivateKey::generate`]), and a new `k` is drawn if `r` or `s` is
+    /// zero. Signatures are therefore randomized, not deterministic (RFC 6979).
     ///
     /// # Errors
     ///
@@ -251,20 +365,22 @@ impl<C: Curve> PrivateKey<C> {
     /// # Example
     ///
     /// ```
-    /// use wolf_crypto::{ecc::{PrivateKey, P256}, hash::Sha256, random::Rng};
+    /// use wolf_crypto::{ecc::{PrivateKey, Prehash, P256}, hash::Sha256, random::Rng};
     ///
     /// let mut rng = Rng::new().unwrap();
     /// let mut key = PrivateKey::<P256>::generate(&mut rng).unwrap();
     ///
     /// let mut hasher = Sha256::new().unwrap();
     /// assert!(hasher.try_update(b"hello world").is_ok());
-    /// let digest = hasher.try_finalize().unwrap();
+    /// let digest = Prehash::<P256>::from_hasher(hasher).unwrap();
     ///
     /// let sig = key.sign_digest(&digest, &mut rng).unwrap();
-    /// assert!(key.public_key().unwrap().verify_digest(&digest, &sig).is_ok());
+    /// let public = key.public_key().unwrap();
+    /// assert!(public.verify_digest(&digest, &sig).is_ok());
+    /// assert!(public.verify(b"hello world", &sig).is_ok());
     /// ```
     pub fn sign_digest(
-        &mut self, digest: &C::Digest, rng: &mut Rng
+        &mut self, digest: &Prehash<C>, rng: &mut Rng
     ) -> Result<Signature<C>, Unspecified> {
         let mut der = C::DerBuf::zeroes();
         let mut der_len = C::DerBuf::LEN as u32;
@@ -276,7 +392,7 @@ impl<C: Curve> PrivateKey<C> {
             // checks the bound and sets `der_len` to the bytes written. `rng` is valid and
             // anchored for the duration of the call, the key is initialized and on curve `C`.
             res.ensure_0(wc_ecc_sign_hash(
-                digest.as_ref().as_ptr(), C::SIZE as u32,
+                digest.as_bytes().as_ref().as_ptr(), C::SIZE as u32,
                 der.as_mut().as_mut_ptr(), addr_of_mut!(der_len),
                 rng.as_mut_ptr(),
                 self.key.as_mut_ptr()
@@ -309,23 +425,22 @@ impl<C: Curve> PrivateKey<C> {
     /// ```
     #[inline]
     pub fn sign(&mut self, msg: &[u8], rng: &mut Rng) -> Result<Signature<C>, Unspecified> {
-        let digest = C::digest(msg)?;
-        self.sign_digest(&digest, rng)
+        self.sign_digest(&Prehash::digest(msg)?, rng)
     }
 }
 
 impl<C: Curve> PublicKey<C> {
-    /// Verify a signature over a digest computed by the caller.
+    /// Verify a signature over a digest of the hash function tied to the curve (SHA-256 for
+    /// [`P256`](crate::ecc::P256), SHA-384 for [`P384`](crate::ecc::P384)), see [`Prehash`].
     ///
-    /// The digest must be the output of the hash function matching the curve, SHA-256 for
-    /// [`P256`](crate::ecc::P256) and SHA-384 for [`P384`](crate::ecc::P384).
+    /// Note that ECDSA signatures are [malleable](Signature#malleability).
     ///
     /// # Returns
     ///
     /// An OK [`Res`] if and only if the signature is valid.
-    pub fn verify_digest(&self, digest: &C::Digest, sig: &Signature<C>) -> Res {
+    pub fn verify_digest(&self, digest: &Prehash<C>, sig: &Signature<C>) -> Res {
         let Ok(der) = sig.to_der() else { return Res::ERR };
-        let mut tmp = self.key.copy();
+        let mut tmp = self.key.copy_public();
         let mut stat: core::ffi::c_int = 0;
         let mut res = Res::new();
 
@@ -336,7 +451,7 @@ impl<C: Curve> PublicKey<C> {
             // used.
             res.ensure_0(wc_ecc_verify_hash(
                 der.as_slice().as_ptr(), der.len as u32,
-                digest.as_ref().as_ptr(), C::SIZE as u32,
+                digest.as_bytes().as_ref().as_ptr(), C::SIZE as u32,
                 addr_of_mut!(stat),
                 tmp.as_mut_ptr()
             ));
@@ -354,7 +469,7 @@ impl<C: Curve> PublicKey<C> {
     ///
     /// An OK [`Res`] if and only if the message could be hashed and the signature is valid.
     pub fn verify(&self, msg: &[u8], sig: &Signature<C>) -> Res {
-        C::digest(msg).map_or(Res::ERR, |digest| self.verify_digest(&digest, sig))
+        Prehash::digest(msg).map_or(Res::ERR, |digest| self.verify_digest(&digest, sig))
     }
 }
 
@@ -517,8 +632,8 @@ mod property_tests {
                         ).unwrap();
                         prop_assert!(vk.verify(&msg, &rc_der).is_ok());
 
-                        let digest = <$curve as Curve>::digest(&msg).unwrap();
-                        prop_assert!(vk.verify_prehash(&digest, &rc_sig).is_ok());
+                        let digest = Prehash::<$curve>::digest(&msg).unwrap();
+                        prop_assert!(vk.verify_prehash(digest.as_bytes(), &rc_sig).is_ok());
                     }
 
                     #[test]

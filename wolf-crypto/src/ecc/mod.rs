@@ -8,9 +8,13 @@
 //! - The curve is a type parameter of every key, signature, and shared secret, so keys of
 //!   different curves cannot be combined: a [`PrivateKey<P256>`] only agrees with a
 //!   [`PublicKey<P256>`], and only verifies / produces a [`Signature<P256>`].
-//! - All sizes are fixed by the curve: scalars, points, digests and signatures are byte arrays
-//!   whose length is determined by the [`Curve`], so a digest of the wrong length (for example a
-//!   SHA-384 digest with [`P256`]) does not compile.
+//! - All sizes are fixed by the curve: scalars, points and signatures are byte arrays whose
+//!   length is determined by the [`Curve`].
+//! - ECDSA signs and verifies a [`Prehash<C>`], the digest of the hash function tied to the
+//!   curve (SHA-256 for [`P256`], SHA-384 for [`P384`]). It is computed from the message or
+//!   from the crate's hasher of that function, so a digest of another hash function (for
+//!   example SHA-384 with [`P256`]), or arbitrary bytes, cannot be signed by mistake. Bytes
+//!   computed elsewhere must be wrapped explicitly with [`Prehash::assume_digest`].
 //! - A [`PublicKey`] can only be constructed through full public-key validation
 //!   (SP 800-56A rev. 3, section 5.6.2.3.3), so every public key used for ECDH or verification
 //!   is known to be a valid point of prime order on its curve.
@@ -49,7 +53,7 @@
 //!
 //! Keys of different curves cannot be used together:
 //!
-//! ```compile_fail
+//! ```compile_fail,E0308
 //! use wolf_crypto::{ecc::{PrivateKey, P256, P384}, random::Rng};
 //!
 //! let mut rng = Rng::new().unwrap();
@@ -59,14 +63,27 @@
 //! let _ = ours.diffie_hellman(&theirs, &mut rng); // does not compile!
 //! ```
 //!
-//! Nor can a digest of the wrong size be signed:
+//! Nor can the digest of the wrong hash function be signed:
 //!
-//! ```compile_fail
-//! use wolf_crypto::{ecc::{PrivateKey, P256}, hash::Sha384, random::Rng};
+//! ```compile_fail,E0308
+//! use wolf_crypto::{ecc::{PrivateKey, Prehash, P256}, hash::Sha384, random::Rng};
 //!
 //! let mut rng = Rng::new().unwrap();
 //! let mut key = PrivateKey::<P256>::generate(&mut rng).unwrap();
-//! let digest = Sha384::new().unwrap().try_finalize().unwrap(); // 48 bytes
+//!
+//! // P-256 signs SHA-256 digests
+//! let digest = Prehash::<P256>::from_hasher(Sha384::new().unwrap()); // does not compile!
+//! # let _ = key.sign_digest(&digest.unwrap(), &mut rng);
+//! ```
+//!
+//! or raw bytes:
+//!
+//! ```compile_fail,E0308
+//! use wolf_crypto::{ecc::{PrivateKey, P256}, hash::Sha256, random::Rng};
+//!
+//! let mut rng = Rng::new().unwrap();
+//! let mut key = PrivateKey::<P256>::generate(&mut rng).unwrap();
+//! let digest = Sha256::new().unwrap().try_finalize().unwrap(); // [u8; 32]
 //!
 //! let _ = key.sign_digest(&digest, &mut rng); // does not compile!
 //! ```
@@ -82,7 +99,7 @@ mod ecdsa;
 
 pub use key::{PrivateKey, PublicKey, PrivateKeyBytes};
 pub use ecdh::{SharedSecret, EphemeralSecret};
-pub use ecdsa::{Signature, DerSignature};
+pub use ecdsa::{Signature, DerSignature, Prehash};
 
 /// A fixed-size byte array used for the encodings of a [`Curve`].
 ///
@@ -140,6 +157,10 @@ pub trait Curve : EccSealed {
     /// [`P384`] (`SIZE` bytes).
     type Digest: ByteArray;
 
+    /// The hasher of the hash function tied to this curve: [`Sha256`](crate::hash::Sha256)
+    /// for [`P256`] and [`Sha384`](crate::hash::Sha384) for [`P384`].
+    type Hasher;
+
     /// A raw ECDSA signature, `r || s` (`2 * SIZE` bytes).
     type RawSignature: ByteArray;
 
@@ -148,6 +169,9 @@ pub trait Curve : EccSealed {
 
     #[doc(hidden)]
     fn digest(msg: &[u8]) -> Result<Self::Digest, Unspecified>;
+
+    #[doc(hidden)]
+    fn finalize(hasher: Self::Hasher) -> Result<Self::Digest, Unspecified>;
 }
 
 macro_rules! define_curve {
@@ -180,11 +204,17 @@ macro_rules! define_curve {
             type Digest = [u8; $sz];
             type RawSignature = [u8; $sig];
             type DerBuf = [u8; $der];
+            type Hasher = crate::hash::$hash;
 
             #[inline]
             fn digest(msg: &[u8]) -> Result<Self::Digest, Unspecified> {
                 let mut hasher = crate::hash::$hash::new()?;
                 hasher.try_update(msg).unit_err(())?;
+                hasher.try_finalize()
+            }
+
+            #[inline]
+            fn finalize(mut hasher: Self::Hasher) -> Result<Self::Digest, Unspecified> {
                 hasher.try_finalize()
             }
         }

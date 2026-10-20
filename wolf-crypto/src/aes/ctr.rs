@@ -1,5 +1,5 @@
 use core::ptr::{addr_of_mut};
-use wolf_crypto_sys::{Aes as AesLL, wc_AesCtrEncrypt, wc_AesSetKey, wc_AesFree};
+use wolf_crypto_sys::{Aes as AesLL, wc_AesCtrEncrypt, wc_AesSetKey};
 use crate::aes::{Key, init_aes, AesM};
 use crate::ptr::{ConstPtr};
 use core::ffi::c_int;
@@ -180,11 +180,10 @@ macro_rules! impl_aes_type {
                     // SAFETY:
                     //
                     // We are in the drop implementation, so we are never going to be using the
-                    // `Aes` type again. Since we are configured to not malloc, this simply zeroes
-                    // the secrets that were copied on `wc_AesSetKey` invocation. I wish there
-                    // was a way to avoid the copying as I do not like secrets living in memory
-                    // more than once, but I understand the decision to do this for ensuring safety.
-                    wc_AesFree(addr_of_mut!(self.inner));
+                    // `Aes` type again. `wc_AesFree` does not clear the key schedule copied in
+                    // by `wc_AesSetKey` in our configuration, `free_aes` zeroes the whole
+                    // struct after it.
+                    $crate::aes::free_aes(addr_of_mut!(self.inner));
                 }
             }
         }
@@ -427,6 +426,16 @@ mod tests {
     use aes::Aes256;
     use ctr::cipher::{KeyIvInit, StreamCipher};
     use super::*;
+
+    #[test]
+    fn drop_zeroes_key_schedule() {
+        let ctr = AesCtr::new(&Key::Aes256([0xa5; 32]), &[0u8; 16].into()).unwrap();
+        let (before, after) = crate::aes::test_utils::aes_set_before_after_drop(
+            ctr, |c| unsafe { core::ptr::addr_of!((*c).inner) }
+        );
+        assert!(before);
+        assert!(!after, "the key schedule survived the drop");
+    }
 
     #[test]
     fn apply_smoke() {

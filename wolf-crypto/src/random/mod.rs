@@ -45,26 +45,26 @@ use wolf_crypto_sys::{
     WC_RNG, wc_InitRng, wc_FreeRng,
     wc_RNG_GenerateBlock,
 };
-use core::mem;
+use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use crate::opaque_res::Res;
 use crate::error::Unspecified;
 
-/// # SAFETY
+/// Instantiate the DRBG in the `WC_RNG` at `rng`.
 ///
-/// The returned `WC_RNG` (position 0 of the returned tuple) is **only initialized if** Res is OK.
-/// Using it without guarding against the Res being OK will cause undefined behavior.
+/// # Safety
 ///
-/// Under `WOLFSSL_NO_MALLOC` the `drbg` field of the returned `WC_RNG` points into this
-/// function's stack frame (see [`Rng::anchor`]); it must be re-anchored before any use.
+/// `rng` must be valid for writes of a `WC_RNG`. The `WC_RNG` is **only initialized if** the
+/// returned `Res` is OK; using it otherwise is undefined behavior.
+///
+/// Under `WOLFSSL_NO_MALLOC` the `drbg` field of the `WC_RNG` points at its own `drbg_data`
+/// (see [`Rng::anchor`]), so it must be re-anchored after the `WC_RNG` is moved.
+#[must_use = "the `WC_RNG` is only initialized if the result is OK"]
 #[inline]
-pub(crate) unsafe fn init_rng() -> (WC_RNG, Res) {
+unsafe fn init_rng_in_place(rng: *mut WC_RNG) -> Res {
     let mut res = Res::new();
-
-    let mut wc_rng: WC_RNG = mem::zeroed();
-    res.ensure_0(wc_InitRng(addr_of_mut!(wc_rng)));
-
-    (wc_rng, res)
+    res.ensure_0(wc_InitRng(rng));
+    res
 }
 
 // Exact definition of `MAX_REQUEST_LEN` in wolfcrypt/src/random.c
@@ -117,6 +117,13 @@ const fn fill_predicate_sized<const C: usize>() -> bool {
 /// #
 /// # drop(my_iv); drop(my_aes_256_key); drop(my_aes_192_key); drop(my_aes_128_key);
 /// ```
+///
+/// # Note on Moves
+///
+/// The DRBG state (`V`, `C`) is secret: knowing it predicts all future output. It is zeroed
+/// on drop (`wc_FreeRng`), but, as with any Rust value, moving an `Rng` may leave copies of its
+/// bytes in the previous location (for example on the stack), which are not zeroed. Avoid
+/// moving long-lived generators (for example, keep them behind a reference or in a `Box`).
 #[repr(transparent)]
 pub struct Rng {
     inner: WC_RNG
@@ -146,19 +153,27 @@ impl Rng {
     /// # drop(iv);
     /// ```
     pub fn new() -> Result<Self, Unspecified> {
-        unsafe {
-            let (maybe_rng, res) = init_rng();
+        // wolfcrypt instantiates the DRBG directly in the `Rng` which is returned, not in a
+        // separate `WC_RNG` which is then copied into it (leaving a stale copy of the DRBG
+        // state behind). The returned value may still be moved, see the type's note on moves.
+        let mut rng = MaybeUninit::<Self>::zeroed();
 
-            // SAFETY:
-            //
-            // `maybe_rng` is only confirmed to be initialized iff res is OK. It may not be a
-            // perfect biconditional, though it is certainly an implication
-            // res -> is-init maybe_rng.
-            //
-            // The `drbg` pointer of `maybe_rng` is dangling at this point (it pointed into
-            // `init_rng`'s frame), every use of `inner` goes through `as_mut_ptr`, which
-            // re-anchors it first.
-            res.unit_err_with(|| Self { inner: maybe_rng })
+        unsafe {
+            // SAFETY: `rng` is valid for writes of a `Rng`, which is a `repr(transparent)`
+            // `WC_RNG`. `wc_InitRng` only writes to the provided `WC_RNG`.
+            let res = init_rng_in_place(addr_of_mut!((*rng.as_mut_ptr()).inner));
+
+            if res.is_err() {
+                // SAFETY: `WC_RNG` is a flat C struct for which all zeroes is a valid value
+                // (null pointers, zero integers); this clears any partial DRBG state. Nothing
+                // is dropped, the `MaybeUninit` is never assumed initialized.
+                zeroize::zeroize_flat_type(rng.as_mut_ptr().cast::<WC_RNG>());
+            }
+
+            // SAFETY: `rng` is only assumed initialized iff `wc_InitRng` succeeded. Its `drbg`
+            // pointer refers to `drbg_data` at the current location, returning the `Rng` may
+            // move it, every use of `inner` goes through `as_mut_ptr`, which re-anchors it.
+            res.unit_err_with(|| rng.assume_init())
         }
     }
 

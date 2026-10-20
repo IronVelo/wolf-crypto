@@ -60,19 +60,41 @@ If we are forced to continue making assumptions this list will expand. On every 
   =_InitRng=), which makes the =WC_RNG= self-referential, and Rust moves values freely. =random::Rng=
   therefore re-points =drbg= at its own =drbg_data= before every call into wolfcrypt (=Rng::anchor=,
   used by =Rng::as_mut_ptr= and =Drop=). Without this, a moved =Rng= makes wolfcrypt read and write
-  (and on free, zero) the memory where the =Rng= was first initialized.
+  (and on free, zero) the memory where the =Rng= was first initialized. =Rng::new= has =wc_InitRng=
+  instantiate the DRBG directly in the =Rng= it returns (no intermediate =WC_RNG= is copied), and
+  zeroes the storage if instantiation fails.
 
   Check that:
   - =drbg= is only assigned in =_InitRng= (to =&rng->drbg_data= or null on failure) and in
     =wc_FreeRng= (null), and that no other pointer into the =WC_RNG= is stored anywhere;
   - the field names =drbg= and =drbg_data= are unchanged (otherwise the build fails, which is fine).
 
+- =wc_AesFree= does not clear the key schedule (=Aes::key=), nor GCM's =H= and tables, without
+  hardware, async or crypto-callback back-ends ([[file:wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/aes.c][aes.c]], =wc_AesFree=). =aes::free_aes= (used by
+  the =Drop= of =AesCtr= and =AesGcm=) therefore zeroes the whole =Aes= after =wc_AesFree=. Check
+  that =Aes= is still a flat struct for which all zeroes is valid and which owns nothing released
+  after =wc_AesFree= (for example no =streamData= allocation, which needs =WOLFSSL_AESGCM_STREAM=
+  with =WOLFSSL_SMALL_STACK=).
+
 - Ensure that =ecc_key= (and =ecc_point=, =mp_int= / =fp_int=) remain plain data under our
   configuration: no pointers into the key itself and no owned allocations. =ecc::Key= is moved by
-  Rust, and bitwise copied (=Key::copy=) to call functions which take a non-const =ecc_key*= from a
-  shared reference: =wc_ecc_verify_hash= (writes =key->state=), =wc_ecc_export_x963=,
-  =wc_ecc_export_private_only=, =wc_EccPublicKeyToDer=, and the peer key of
-  =wc_ecc_shared_secret=. The copies are zeroed on drop.
+  Rust, and public keys are bitwise copied (=Key::copy_public=) to call functions which take a
+  non-const =ecc_key*= and write to it from a shared reference: =wc_ecc_verify_hash= (writes
+  =key->state=) and the peer key of =wc_ecc_shared_secret=. The copies are zeroed on drop. Keys
+  holding a private scalar are never copied.
+
+- Ensure that these functions, which take a non-const =ecc_key*=, still only read the key. They
+  are called through a pointer derived from a shared reference (=Key::as_read_only_ptr=), so a
+  write would be undefined behaviour, and private keys are passed without copying them:
+  - =wc_ecc_export_x963= (=PublicKey::to_sec1=, =PrivateKey::public_key=): reads =type=, =idx=,
+    =dp= and the public point (=mp_unsigned_bin_size=, =mp_to_unsigned_bin=, which copies the
+    integer into a temporary before converting it);
+  - =wc_ecc_export_private_only= (=PrivateKey::to_bytes=): =wc_ecc_export_ex= reads =idx=, =dp=,
+    =type= and =k= through =wc_export_int=;
+  - =wc_EccPublicKeyToDer= (=PublicKey::to_spki_der=): =SetEccPublicKey= reads =dp= (=SetCurve=)
+    and exports the point with =wc_ecc_export_x963_ex= (=wc_ecc_export_x963= when uncompressed).
+  Note that =fp_to_unsigned_bin= leaves its temporary copy of the integer (for
+  =wc_ecc_export_private_only=, the private scalar) on wolfcrypt's stack without zeroing it.
 
   The current struct only holds =dp= (pointer to the static =ecc_sets= table), =heap= (null),
   =rng= (see below) and inline big integers. Any of these defines would break the assumption and
@@ -97,11 +119,22 @@ If we are forced to continue making assumptions this list will expand. On every 
   validated =PrivateKey=. Check that =wc_ecc_check_key= still performs the infinity, range,
   on-curve and order checks, and the private key range check =[1, n - 1]= for private keys.
 
-- Ensure that =wc_EccPublicKeyDecode= only accepts named curves in our build (no
-  =WOLFSSL_CUSTOM_CURVES=) and still reports the consumed length through =inOutIdx=. We require the
-  whole input to be consumed and the curve (=wc_ecc_get_curve_id(key->idx)=, reading the public
-  =idx= field) to be the expected one. =wc_ecc_sig_to_rs= may accept non-canonical encodings,
-  =ecc::Signature::from_der= re-encodes and compares, so this does not need to hold.
+- =wc_EccPublicKeyDecode= is not a strict =SubjectPublicKeyInfo= parser: in ASN template mode it
+  falls back to the RFC 5915 =ECPrivateKey= template when the input is not an SPKI (=asn.c=,
+  =wc_EccPublicKeyDecode=, around the =eccKeyASN= fallback), and it accepts a =BIT STRING= with a
+  non-zero unused-bits octet (when the padding bits are zero), which is not the encoding of an
+  uncompressed point. =PublicKey::from_spki_der= therefore requires the whole input to be
+  consumed, the curve (=wc_ecc_get_curve_id(key->idx)=) to be the expected one and the key type to
+  be =ECC_PUBLICKEY=, and then re-encodes the key with =wc_EccPublicKeyToDer= and requires the
+  result to equal the input, so only the canonical encoding is accepted whatever the decoder
+  accepts. This relies on =wc_EccPublicKeyToDer= producing the canonical SPKI (named curve,
+  uncompressed point, no unused bits), which the tests check against RustCrypto. Check that the
+  decoder still reports the consumed length through =inOutIdx= and only accepts named curves in our
+  build (no =WOLFSSL_CUSTOM_CURVES=). The regression tests =spki_rejects_ec_private_key= and
+  =spki_rejects_unused_bits_*= assert that wolfcrypt alone still accepts their inputs; if one fails
+  after an update because wolfcrypt became stricter, update the test, the defence stays.
+  Likewise =wc_ecc_sig_to_rs= may accept non-canonical encodings, =ecc::Signature::from_der=
+  re-encodes and compares, so this does not need to hold.
 
 - Key generation self-tests. =WOLFSSL_VALIDATE_ECC_KEYGEN= (and FIPS v5+, which forces it) runs
   =_ecc_pairwise_consistency_test= after =wc_ecc_make_key_ex=, which allocates its signature buffer

@@ -19,6 +19,12 @@ use crate::sealed::FipsSealed;
 ///
 /// This type is neither `Copy` nor `Clone`, its equality is constant-time, and it zeroes its
 /// memory on drop.
+///
+/// # Note on Moves
+///
+/// As with any Rust value, moving a `SharedSecret` may leave copies of its bytes in the
+/// previous location (for example on the stack), which are not zeroed. Derive keys from it
+/// where it was returned rather than moving it around.
 pub struct SharedSecret<C: Curve> {
     inner: C::Scalar,
     _curve: PhantomData<C>
@@ -108,7 +114,7 @@ impl<C: Curve> PrivateKey<C> {
         let mut len = C::SIZE as u32;
         let mut res = Res::new();
         // wolfcrypt takes the public key as mutable, work on a private copy.
-        let mut peer = peer.key.copy();
+        let mut peer = peer.key.copy_public();
 
         unsafe {
             // SAFETY: Both keys are initialized. The rng pointer is stored in the private key
@@ -167,7 +173,7 @@ impl<C: Curve> PrivateKey<C> {
 ///
 /// An `EphemeralSecret` cannot be reused:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0382
 /// use wolf_crypto::{ecc::{EphemeralSecret, P256}, random::Rng};
 ///
 /// let mut rng = Rng::new().unwrap();

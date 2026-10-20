@@ -1,13 +1,18 @@
 //! NIST CAVP known-answer tests for ECDSA (FIPS 186-4 SigVer, SigGen, PKV) and the ECC CDH
 //! primitive (SP 800-56A, KAS ECC CDH component).
 //!
+//! The SigGen vectors are used for key derivation and verification only: each signature was
+//! produced with a per-message secret `k` which the API cannot be given, so the signatures
+//! this crate generates cannot be compared with them (they are checked by the property tests,
+//! which verify them with RustCrypto).
+//!
 //! The vectors are the P-256 / P-384 subsets of the official CAVP files, committed under
 //! `tests/vectors/` (see `tests/README.org` for their provenance). Only the hash matching the
 //! curve is tested (SHA-256 with P-256, SHA-384 with P-384), as the API does not allow signing
 //! or verifying digests of another size.
 
 use std::fs;
-use wolf_crypto::ecc::{ByteArray, Curve, PrivateKey, PublicKey, Signature, P256, P384};
+use wolf_crypto::ecc::{ByteArray, Curve, Prehash, PrivateKey, PublicKey, Signature, P256, P384};
 use wolf_crypto::hash::{Sha256, Sha384};
 use wolf_crypto::random::Rng;
 
@@ -116,7 +121,9 @@ fn signature<C: Curve>(case: &Case) -> Signature<C> {
     Signature::<C>::try_from(raw.as_slice()).unwrap()
 }
 
-fn digest<C: Curve>(msg: &[u8]) -> C::Digest {
+/// The digest of `msg` computed independently of `Prehash::digest`, with the hash function the
+/// curve's section uses.
+fn digest<C: Curve>(msg: &[u8]) -> Prehash<C> {
     let mut out = C::Digest::zeroes();
     match C::SIZE {
         32 => {
@@ -131,7 +138,7 @@ fn digest<C: Curve>(msg: &[u8]) -> C::Digest {
         },
         _ => unreachable!()
     }
-    out
+    Prehash::assume_digest(out)
 }
 
 fn sig_ver<C: Curve>(section: &str) -> usize {
@@ -158,6 +165,8 @@ fn sig_ver<C: Curve>(section: &str) -> usize {
     count
 }
 
+/// SigGen: `d` derives the published `Q`, and the published `(R, S)` verifies for `Msg` under
+/// `Q` (and not for a modified message). Signing with the vector's `k` is not possible.
 fn sig_gen<C: Curve>(section: &str) -> usize {
     let mut rng = Rng::new().unwrap();
     let mut count = 0;
@@ -176,6 +185,7 @@ fn sig_gen<C: Curve>(section: &str) -> usize {
         let public = PublicKey::<C>::from_sec1(&q).unwrap();
         let sig = signature::<C>(case);
         assert!(public.verify(&msg, &sig).is_ok(), "SigGen [{section}] case {count}");
+        assert!(public.verify_digest(&digest::<C>(&msg), &sig).is_ok());
 
         let mut tampered = msg.clone();
         tampered[0] ^= 1;
