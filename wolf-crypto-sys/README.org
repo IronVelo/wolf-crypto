@@ -1,4 +1,5 @@
 *WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.*
 
-This library provides low-level bindings for wolfcrypt by wolfSSL. Thus it is under the GPLv2 license unless you paid
-wolfSSL for a commercial license.
+This library provides low-level bindings for wolfcrypt by wolfSSL. The bindings are under the MIT
+license (=LICENSE=). The bundled wolfcrypt sources in =wolfcrypt/= are wolfSSL's, under
+GPL-2.0-or-later (=wolfcrypt/COPYING=) unless you have a commercial license from wolfSSL.

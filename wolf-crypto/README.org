@@ -109,7 +109,9 @@ Our testing framework is continuously evolving, with ongoing efforts focused on:
 
 * License
 
-This library is under GPLv2 licensing *unless* you purchased a commercial license from wolfSSL.
+The Rust code of this library is under the MIT license. It links wolfSSL's =wolfcrypt=
+(through =wolf-crypto-sys=), which is under GPL-2.0-or-later unless you have a commercial
+license from wolfSSL; the combined work is subject to wolfcrypt's license.
 
 * Roadmap [2/6]
 

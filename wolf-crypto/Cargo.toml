@@ -2,7 +2,7 @@
 name = "wolf-crypto"
 version = "0.1.0-alpha.15"
 edition = "2021"
-license = "GPL-2.0-only"
+license = "MIT"
 categories = ["no-std", "no-std::no-alloc", "cryptography"]
 keywords = ["digest", "aead", "cipher", "crypto", "wolfcrypt"]
 authors = ["Clelland Green <cg@ironvelo.com>"]
