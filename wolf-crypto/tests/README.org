@@ -121,3 +121,29 @@ The tests cover, for AES-128, AES-192 and AES-256 and every plaintext length (12
 - KW-AE: wrapping =P= under =K= gives =C=.
 - KW-AD: unwrapping =C= under =K= gives =P=, or fails for the cases marked =FAIL= (20 per plaintext length).
 
+* Hash_DRBG
+
+=nist_drbg.rs= runs the CAVP DRBGVS vectors for the Hash_DRBG (SHA-256) mechanism behind =random::Rng=,
+through =random::kat::hash_drbg_sha256=. The needed subset is committed under =vectors/drbg/= and the tests
+run offline.
+
+| File                                 | Source file in the CAVP zip                  | Sections kept |
+|--------------------------------------+----------------------------------------------+---------------|
+| =vectors/drbg/Hash_DRBG_no_reseed.rsp= | =drbgvectors_no_reseed.zip=: =Hash_DRBG.rsp= | see below     |
+| =vectors/drbg/Hash_DRBG_pr_false.rsp=  | =drbgvectors_pr_false.zip=: =Hash_DRBG.rsp=  | see below     |
+
+Source (fetched 2026-10-20):
+
+- [[https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/drbg/drbgtestvectors.zip][drbgtestvectors.zip]],
+  SHA-256 =5f7e5658ebd5b4e6785a7b12fa32333511d2acc2f2d9c5ae1ffa16b699377769=
+
+The subset files are byte-for-byte copies of the original header comments and of the kept sections (CRLF line
+endings preserved), every other section is dropped. Kept are the =[SHA-256]= sections with
+=[PersonalizationStringLen = 0]= and =[AdditionalInputLen = 0]= (4 sections of 15 cases in each file), as
+=wolfcrypt='s known-answer interface (=wc_RNG_HealthTest_ex=) takes neither input. The =pr_true= set is not
+used, prediction resistance is not offered.
+
+The tests cover:
+
+- =no_reseed=: instantiate with =EntropyInput= and =Nonce=, generate twice, the second output is =ReturnedBits=.
+- =pr_false=: the same, with a reseed with =EntropyInputReseed= after instantiation.

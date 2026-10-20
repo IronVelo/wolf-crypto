@@ -85,11 +85,32 @@ const fn fill_predicate_sized<const C: usize>() -> bool {
     C <= MAX_REQUEST_SIZE
 }
 
+mod hash_drbg;
+pub mod kat;
+
+pub use hash_drbg::{SECURITY_STRENGTH, MIN_ENTROPY_SIZE, MIN_NONCE_SIZE};
+
 /// Random Bit Generator
 ///
 /// `Rng` is a safe zero-cost abstraction over wolfcrypt's `WC_RNG`, with a convenient interface
 /// for generating key material, initialization vectors, or simply filling some slice with random
 /// bytes.
+///
+/// # Mechanism
+///
+/// `Rng` is the NIST SP 800-90A `Hash_DRBG` with SHA-256 ([`SECURITY_STRENGTH`] of 256 bits), an
+/// approved DRBG, and is therefore marked [`Fips`](crate::Fips). It is seeded from the
+/// operating system's entropy source and reseeded automatically; it can also be instantiated
+/// with a caller-provided nonce ([`Rng::with_nonce`]) and reseeded with caller-provided entropy
+/// ([`Rng::reseed`]). FIPS 140-3 additionally requires a validated entropy source, which is a
+/// property of the platform rather than of this type. The mechanism itself is tested against
+/// the NIST CAVP vectors through [`kat::hash_drbg_sha256`].
+///
+/// ```
+/// use wolf_crypto::{ensure_fips, random::Rng};
+///
+/// ensure_fips::<Rng>();
+/// ```
 ///
 /// # Example
 ///

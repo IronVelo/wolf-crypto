@@ -113,7 +113,7 @@ The Rust code of this library is under the MIT license. It links wolfSSL's =wolf
 (through =wolf-crypto-sys=), which is under GPL-2.0-or-later unless you have a commercial
 license from wolfSSL; the combined work is subject to wolfcrypt's license.
 
-* Roadmap [2/8]
+* Roadmap [3/9]
 
 - [X] Hashing [6/6]
   - [X] SHA2 [6/6]
@@ -203,6 +203,12 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
   - [X] PBKDF1
   - [X] PBKDF2
   - [ ] PKCS12 PBKDF
+
+- [X] Random Bit Generation [1/1]
+  - [X] Hash_DRBG (SP 800-90A, SHA-256) [3/3]
+    - [X] Generation, seeded from the operating system
+    - [X] Caller-provided nonce on instantiation, reseeding with caller-provided entropy
+    - [X] Known-answer tests of the mechanism (NIST CAVP)
 
 - [-] Key Wrapping [1/2]
   - [X] AES-KW (SP 800-38F, RFC 3394) [3/3]

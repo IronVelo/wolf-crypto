@@ -137,6 +137,30 @@ The ECC and RNG items above were checked against the vendored sources on 2026-10
 
 The AES key wrap items above were checked against the vendored sources on 2026-10-20.
 
+- Ensure that =random::Rng= is still a Hash_DRBG, which its =Fips= marker relies on. This holds while
+  =HAVE_HASHDRBG= is the generator: =CUSTOM_RAND_GENERATE_BLOCK=, =WC_NO_HASHDRBG= or
+  =HAVE_INTEL_RDRAND= (which bypasses the DRBG in =_InitRng= and =wc_RNG_GenerateBlock=, and makes
+  =wc_RNG_DRBG_Reseed= a successful no-op) must not be enabled without revisiting the marker and
+  =Rng::reseed=.
+
+- Ensure that the DRBG functions behind =random::hash_drbg= and =random::kat= keep their contract
+  ([[file:wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/random.c][random.c]]):
+  - =wc_InitRngNonce= only reads the nonce (the parameter is not =const=) and passes it to
+    =Hash_DRBG_Instantiate= as the nonce. With a caller nonce it draws =SEED_SZ= entropy bytes and no
+    nonce of its own (=SEED_SZ + SEED_SZ / 2= without), so =Rng::with_nonce= requires at least 16 bytes.
+  - =wc_RNG_DRBG_Reseed= does not check the entropy length nor the generator status, and returns 0
+    (=DRBG_SUCCESS=) or a non-zero error. =Rng::reseed= enforces at least 32 bytes and runs
+    =wc_RNG_TestSeed= first; check that =wc_RNG_TestSeed= still only reads =seedSz= bytes and needs
+    =seedSz > SEED_BLOCK_SZ=.
+  - =wc_RNG_HealthTest_ex= instantiates (entropy A, nonce), optionally reseeds (entropy B), generates
+    twice and returns the second block, requires =outputSz == RNG_HEALTH_TEST_CHECK_SIZE= (128) and
+    uninstantiates its DRBG on every path. It takes no personalization string nor additional input,
+    which limits =random::kat= (and the CAVP sections tested) accordingly.
+  - =WC_RNG_SEED_CB= is not defined. Its seed callback is process global (=wc_SetSeed_Cb=), so it is
+    not exposed; enabling it changes the entropy source of every =Rng=.
+
+The DRBG items above were checked against the vendored sources on 2026-10-20.
+
 * Current wolfcrypt Version
 
 - Last verified against: =5.7.2=
