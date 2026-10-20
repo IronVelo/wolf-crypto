@@ -12,13 +12,13 @@ maintainer to accept or reject.
 This document plans two pieces of work:
 
 - Part A: a TLS 1.3 binding crate (=wolf-tls=) over wolfSSL's TLS layer for
-  IronDB's peer channel, driven sans-I/O through wolfSSL's I/O callbacks,
+  a peer channel between a fixed set of servers, driven sans-I/O through wolfSSL's I/O callbacks,
   TLS 1.3 only, one suite, one group, mutually authenticated with RFC 7250
   raw public keys pinned by SPKI hash.
 - Part B: how =wolf-crypto-sys= should build against wolfSSL's validated FIPS
   140-3 module (certificate #5548, wolfCrypt v5.2.3), the known ECC
   pairwise-consistency-test blocker under =WOLFSSL_NO_MALLOC=, and which KDF is
-  approved for IronDB's use.
+  approved for an application's use.
 
 ** Primary sources
 
@@ -61,7 +61,7 @@ references are section/page numbers of [SP].
   =MEMORY_E= under =WOLFSSL_NO_MALLOC= (checklist, "Key generation
   self-tests"); it runs =wc_ecc_check_key= instead.
 
-* Part A: wolf-tls, a sans-I/O TLS 1.3 binding for the IronDB peer channel
+* Part A: wolf-tls, a sans-I/O TLS 1.3 binding for closed peer sets
 
 ** Requirements and the wolfSSL facilities that satisfy them
 
@@ -388,7 +388,7 @@ Notes on the typestate:
   is exclusive for the life of the connection; the pool is reusable after
   the =Conn= is dropped and zeroized.
 - One =WOLFSSL_CTX= per connection (not shared): a context carries the
-  credential, pins and pool, all per peer in IronDB's model; sharing would
+  credential, pins and pool, all per peer in the application's model; sharing would
   need the pool mutex and brings nothing.
 - =Error= is a small enum (section [[*Error mapping][Error mapping]]), never a wolfSSL integer.
 
@@ -538,7 +538,7 @@ test must reject every case with =Error::PeerNotAuthenticated= or
 
 1. Should the pin table hold one key per connection (identity by
    construction) or all peers (identity by callback)? The API above supports
-   both; IronDB's membership model decides =WOLFSSL_MAX_RPK_PINS=.
+   both; the application's membership model decides =WOLFSSL_MAX_RPK_PINS=.
 2. =NO_ASN_TIME= for the X.509 fallback: accept pinned leaves regardless of
    validity dates (current proposal) or supply a time source.
 3. Whether to expose =wolfSSL_CTX_set_group_messages= (one flight per
@@ -656,7 +656,7 @@ moves the module's text or rodata invalidates the hash.
    stable in-core hash and is the deployment unit the policy describes
    ("Updates to the Module are provided as a complete replacement", 2.1,
    p. 7). Static linking is offered as =fips-static=, documented as
-   requiring the =fips-hash-offline.sh= post-link step on the final IronDB
+   requiring the =fips-hash-offline.sh= post-link step on the final application
    executable, and is not the default because Cargo has no post-link hook.
 4. Runtime API in =wolf-crypto= (=cfg(feature = "fips")=, module =fips=):
    #+begin_src rust
@@ -716,7 +716,7 @@ option chosen must be one the UG allows for the module build (policy 6.2).
 |----------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------+----------------------------------------+-------------------|
 | 1. =WOLFSSL_STATIC_MEMORY= + =WOLFSSL_NO_MALLOC=, a static pool registered as the global heap hint (=wolfSSL_SetGlobalHeapHint=, present in [VEN] =memory.c:975= and master =memory.c:1018=) and/or passed per object (=wc_ecc_init_ex(key, heap, devId)=, =wc_InitRng_ex=) | =XMALLOC(s, NULL, t)= -> =wolfSSL_Malloc(s, NULL, t)= -> global hint's pool (=memory.c:1052-1091=) | yes, verified ([MEAS] case B)           | yes (key->heap or global hint)         | =WC_RNG= loses =drbg_data= (DRBG goes into the pool, =random.h:684-686=), every allocating object needs a heap hint, =Rng::anchor= disappears |
 | 2. keep today's memory model and register a Rust allocator through =wolfSSL_SetAllocators= (=memory.c:112=); under =WOLFSSL_NO_MALLOC= =wolfSSL_Malloc= still honours a registered =malloc_function= ([VEN] =memory.c:346-368=) | =XMALLOC(s, h, t)= -> =wolfSSL_Malloc(s)= -> Rust fixed arena (a few hundred bytes for the PCT: 2*32+80+32 bytes) | yes (heap argument is ignored)          | yes                                    | smallest: one global allocator callback; no layout changes; but the callback has no context, so one process-wide arena with a lock |
-| 3. ask wolfSSL for a validated =ecc.c= whose PCT does not allocate                     | a code change inside the boundary                                                                                                                             | n/a                                                     | n/a                                    | a new validation or a vendor-affirmed update; not under our control |
+| 3. a validated =ecc.c= whose PCT does not allocate                     | a code change inside the boundary                                                                                                                             | n/a                                                     | n/a                                    | a new validation or a vendor-affirmed update; not under our control |
 | 4. define =WOLFSSL_SMALL_STACK=? (no)                                                  | makes /more/ things allocate                                                                                                                                  | worse                                                   | worse                                  | rejected           |
 
 [MEAS] (Appendix A.2), vendored 5.7.2 sources compiled with
@@ -808,14 +808,14 @@ Consequences:
   =wc_Tls13_HKDF_Expand_Label_ex= in =kdf.c=, =wolfssl/wolfcrypt/kdf.h:88-110=,
   a boundary file) with SHA-384 is an approved use of the module
   (=FIPS_CAST_KDF_TLS13=). =wolf-tls= over a FIPS build is therefore an
-  approved consumer, and every peer-channel key IronDB derives /inside the
+  approved consumer, and every peer-channel key an application derives /inside the
   TLS handshake/ is approved keying material (=KD_DKM=, Table 18).
 - Stand-alone HKDF (=wc_HKDF= in =hmac.c=, =wolfssl/wolfcrypt/hmac.h:210-224=)
   is not an approved service of #5548, so the crate's =kdf::hkdf= is
-  correctly behind =allow-non-fips= and must stay there. IronDB must not
+  correctly behind =allow-non-fips= and must stay there. An application must not
   derive keys from an ECDH =SharedSecret= with HKDF and call that approved;
   the approved way to turn a P-256 agreement into keys with this module is
-  the TLS 1.3 handshake itself. If IronDB needs an approved stand-alone KDF
+  the TLS 1.3 handshake itself. If an application needs an approved stand-alone KDF
   (for example for data-at-rest keys), it has to wait for a wolfCrypt
   module whose certificate lists an SP 800-56C or SP 800-108 KDF; the CAST
   identifier list in [WS] =fips_test.h= (through v7.0.0) contains no HKDF or
@@ -830,12 +830,12 @@ Consequences:
   internal IV generation from the module's DRBG with a nonce of
   >= 96 bits, or protocol (TLS) external IVs. The crate's =aead::AesGcm=
   API, which takes a caller-supplied IV, is the "external IV" case and is
-  only approved when the IV comes from the TLS KDF; for IronDB's own
+  only approved when the IV comes from the TLS KDF; for an application's own
   at-rest encryption the API would need an =encrypt_with_internal_iv=
   variant (=wc_AesGcmSetIV= / =wc_AesGcmEncrypt_ex=, =wolfssl/wolfcrypt/aes.h:787-790=). Out of scope here,
   noted because it falls out of the same table.
 
-** Part B open questions for wolfSSL
+** Part B open questions
 
 - B-1. Exact wrapper naming and =fips.h= contents of the v5.2.3 bundle
   (needed to generate the =fips= re-export layer), and which wolfSSL
