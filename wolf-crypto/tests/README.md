@@ -6,6 +6,7 @@
     2.  [Current State](#org67529c5)
     3.  [Requirements To Run Tests](#orgafb45e2)
 2.  [HMAC](#org73d97ab)
+3.  [ECC (ECDSA and ECC CDH)](#orgecc0001)
 
 
 <a id="orgb5a06e6"></a>
@@ -82,3 +83,43 @@ So, again, you will need to have these installed on your machine to run the test
 HMAC CAVP (HMACVS) is implemented. The test requires `allow-non-fips` to be enabled, this is because the test vectors
 include keys which are not FIPS compliant.
 
+
+<a id="orgecc0001"></a>
+
+# ECC (ECDSA and ECC CDH)
+
+`nist_ecc.rs` runs the CAVP vectors for the `ecc` module. Unlike the hash vectors these are small, so the
+needed subset is committed under `vectors/` and the tests run offline.
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr><th scope="col" class="org-left">File</th><th scope="col" class="org-left">Source file in the CAVP zip</th><th scope="col" class="org-left">Sections kept</th></tr>
+</thead>
+<tbody>
+<tr><td class="org-left"><code>vectors/ecdsa/SigVer.rsp</code></td><td class="org-left"><code>186-4ecdsatestvectors/SigVer.rsp</code></td><td class="org-left"><code>[P-256,SHA-256]</code>, <code>[P-384,SHA-384]</code></td></tr>
+<tr><td class="org-left"><code>vectors/ecdsa/SigGen.txt</code></td><td class="org-left"><code>186-4ecdsatestvectors/SigGen.txt</code></td><td class="org-left"><code>[P-256,SHA-256]</code>, <code>[P-384,SHA-384]</code></td></tr>
+<tr><td class="org-left"><code>vectors/ecdsa/PKV.rsp</code></td><td class="org-left"><code>186-4ecdsatestvectors/PKV.rsp</code></td><td class="org-left"><code>[P-256]</code>, <code>[P-384]</code></td></tr>
+<tr><td class="org-left"><code>vectors/ecccdh/KAS_ECC_CDH_PrimitiveTest.txt</code></td><td class="org-left"><code>KAS_ECC_CDH_PrimitiveTest.txt</code></td><td class="org-left"><code>[P-256]</code>, <code>[P-384]</code></td></tr>
+</tbody>
+</table>
+
+Sources (fetched 2026-10-20):
+
+-   [186-4ecdsatestvectors.zip](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/dss/186-4ecdsatestvectors.zip),
+    SHA-256 `fe47cc92b4cee418236125c9ffbcd9bb01c8c34e74a4ba195d954bcb72824752`
+-   [ecccdhtestvectors.zip](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/components/ecccdhtestvectors.zip),
+    SHA-256 `5fff092551f2d72e89a3d9362711878708f9a14b502f0dfae819649105b0ea39`
+
+The subset files are byte-for-byte copies of the original header comments and of the kept sections (CRLF line
+endings preserved), every other section is dropped. Only the hash matching the curve is kept (SHA-256 with P-256,
+SHA-384 with P-384), since the API does not allow a digest of another size to be signed or verified.
+
+The tests cover:
+
+-   SigVer: every case verifies (`P`) or fails (`F`) as expected; a modified `Q` that is not a valid public key is
+    rejected on import.
+-   SigGen: the private key `d` derives the published `Q`, and the published signature verifies (the per-message
+    secret `k` cannot be injected through the API, so signature generation itself is covered by the property tests
+    against RustCrypto).
+-   PKV: public key validation accepts exactly the valid keys.
+-   ECC CDH: importing `dIUT` derives `QIUT`, and the shared secret with `QCAVS` is `ZIUT`.

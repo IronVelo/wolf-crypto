@@ -57,3 +57,37 @@ So, again, you will need to have these installed on your machine to run the test
 
 HMAC CAVP (HMACVS) is implemented. The test requires =allow-non-fips= to be enabled, this is because the test vectors
 include keys which are not FIPS compliant.
+
+
+* ECC (ECDSA and ECC CDH)
+
+=nist_ecc.rs= runs the CAVP vectors for the =ecc= module. Unlike the hash vectors these are small, so the
+needed subset is committed under =vectors/= and the tests run offline.
+
+| File                                   | Source file in the CAVP zip                            | Sections kept              |
+|----------------------------------------+--------------------------------------------------------+----------------------------|
+| =vectors/ecdsa/SigVer.rsp=             | =186-4ecdsatestvectors/SigVer.rsp=                     | =[P-256,SHA-256]=, =[P-384,SHA-384]= |
+| =vectors/ecdsa/SigGen.txt=             | =186-4ecdsatestvectors/SigGen.txt=                     | =[P-256,SHA-256]=, =[P-384,SHA-384]= |
+| =vectors/ecdsa/PKV.rsp=                | =186-4ecdsatestvectors/PKV.rsp=                        | =[P-256]=, =[P-384]=       |
+| =vectors/ecccdh/KAS_ECC_CDH_PrimitiveTest.txt= | =KAS_ECC_CDH_PrimitiveTest.txt=                | =[P-256]=, =[P-384]=       |
+
+Sources (fetched 2026-10-20):
+
+- [[https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/dss/186-4ecdsatestvectors.zip][186-4ecdsatestvectors.zip]],
+  SHA-256 =fe47cc92b4cee418236125c9ffbcd9bb01c8c34e74a4ba195d954bcb72824752=
+- [[https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/components/ecccdhtestvectors.zip][ecccdhtestvectors.zip]],
+  SHA-256 =5fff092551f2d72e89a3d9362711878708f9a14b502f0dfae819649105b0ea39=
+
+The subset files are byte-for-byte copies of the original header comments and of the kept sections (CRLF line
+endings preserved), every other section is dropped. Only the hash matching the curve is kept (SHA-256 with P-256,
+SHA-384 with P-384), since the API does not allow a digest of another size to be signed or verified.
+
+The tests cover:
+
+- SigVer: every case verifies (=P=) or fails (=F=) as expected; a modified =Q= that is not a valid public key is
+  rejected on import.
+- SigGen: the private key =d= derives the published =Q=, and the published signature verifies (the per-message
+  secret =k= cannot be injected through the API, so signature generation itself is covered by the property tests
+  against RustCrypto).
+- PKV: public key validation accepts exactly the valid keys.
+- ECC CDH: importing =dIUT= derives =QIUT=, and the shared secret with =QCAVS= is =ZIUT=.

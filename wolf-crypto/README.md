@@ -14,7 +14,7 @@
 4.  [Ongoing Testing Priorities](#org44d9ede)
 5.  [Current Priorities](#orge1265ef)
 6.  [License](#org73b40d6)
-7.  [Roadmap <code>[2/6]</code>](#org6c915ae)
+7.  [Roadmap <code>[2/7]</code>](#org6c915ae)
 
 **WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.**
 
@@ -173,7 +173,7 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
 
 <a id="org6c915ae"></a>
 
-# Roadmap <code>[2/6]</code>
+# Roadmap <code>[2/7]</code>
 
 -   [X] Hashing <code>[6/6]</code>
     -   [X] SHA2 <code>[6/6]</code>
@@ -262,5 +262,21 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
     -   [X] PBKDF2
     -   [ ] PKCS12 PBKDF
 
--   [ ] Writing the Remaining Sections (asymmetric, password, padding, etc)
+-   [-] Asymmetric <code>[1/2]</code>
+    -   [X] ECC (NIST prime curves) <code>[2/2]</code>
+        -   [X] P-256 <code>[4/4]</code>
+            -   [X] Key generation, private key import / export
+            -   [X] Public key import / export (uncompressed SEC1, SubjectPublicKeyInfo DER),
+                with full public-key validation
+            -   [X] ECDH (SP 800-56A ECC CDH primitive, ephemeral-unified)
+            -   [X] ECDSA with SHA-256 (raw r||s and DER signatures)
+        -   [X] P-384 <code>[4/4]</code>
+            -   [X] Key generation, private key import / export
+            -   [X] Public key import / export (uncompressed SEC1, SubjectPublicKeyInfo DER),
+                with full public-key validation
+            -   [X] ECDH (SP 800-56A ECC CDH primitive, ephemeral-unified)
+            -   [X] ECDSA with SHA-384 (raw r||s and DER signatures)
+    -   [ ] Remaining asymmetric algorithms (not yet scoped)
+
+-   [ ] Writing the Remaining Sections (password, padding, etc)
 

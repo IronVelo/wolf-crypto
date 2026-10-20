@@ -1,4 +1,4 @@
-//! Safe Abstractions for using WolfCrypt's Random Number Generator C API
+//! Safe Abstractions for using `wolfcrypt`'s Random Number Generator C API
 // Why a module dedicated to `random`?
 //
 // 1. Convenience
@@ -48,12 +48,15 @@ use wolf_crypto_sys::{
 use core::mem;
 use core::ptr::addr_of_mut;
 use crate::opaque_res::Res;
+use crate::error::Unspecified;
 
 /// # SAFETY
 ///
 /// The returned `WC_RNG` (position 0 of the returned tuple) is **only initialized if** Res is OK.
 /// Using it without guarding against the Res being OK will cause undefined behavior.
-#[must_use]
+///
+/// Under `WOLFSSL_NO_MALLOC` the `drbg` field of the returned `WC_RNG` points into this
+/// function's stack frame (see [`Rng::anchor`]); it must be re-anchored before any use.
 #[inline]
 pub(crate) unsafe fn init_rng() -> (WC_RNG, Res) {
     let mut res = Res::new();
@@ -68,6 +71,7 @@ pub(crate) unsafe fn init_rng() -> (WC_RNG, Res) {
 // See: https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/random.c#L217
 // See: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90Ar1.pdf (section 10
 // Table 2)
+/// The maximum number of bytes which can be generated in a single request (`0x10000`).
 pub const MAX_REQUEST_SIZE: usize = 0x10000usize;
 
 #[inline]
@@ -141,7 +145,7 @@ impl Rng {
     /// # drop(key);
     /// # drop(iv);
     /// ```
-    pub fn new() -> Result<Self, ()> {
+    pub fn new() -> Result<Self, Unspecified> {
         unsafe {
             let (maybe_rng, res) = init_rng();
 
@@ -150,8 +154,35 @@ impl Rng {
             // `maybe_rng` is only confirmed to be initialized iff res is OK. It may not be a
             // perfect biconditional, though it is certainly an implication
             // res -> is-init maybe_rng.
-            res.unit_err(Self { inner: maybe_rng })
+            //
+            // The `drbg` pointer of `maybe_rng` is dangling at this point (it pointed into
+            // `init_rng`'s frame), every use of `inner` goes through `as_mut_ptr`, which
+            // re-anchors it first.
+            res.unit_err_with(|| Self { inner: maybe_rng })
         }
+    }
+
+    /// Re-point the `drbg` pointer at this `Rng`'s own `drbg_data`.
+    ///
+    /// With `WOLFSSL_NO_MALLOC` (and without `WOLFSSL_STATIC_MEMORY`), `wc_InitRng` stores the
+    /// DRBG state inline (`WC_RNG::drbg_data`) and sets `WC_RNG::drbg = &rng->drbg_data`
+    /// (`_InitRng` in `random.c`). The `WC_RNG` is therefore self-referential, and moving the
+    /// `Rng` (which Rust may do freely) leaves `drbg` dangling. wolfcrypt only ever accesses the
+    /// DRBG state through `drbg`, so before handing the `WC_RNG` to wolfcrypt we point it back
+    /// at the current location of `drbg_data`.
+    ///
+    /// This relies on wolfcrypt internals, not its API; see `wolfcrypt-update-checklist.org`.
+    #[inline]
+    const fn anchor(&mut self) {
+        self.inner.drbg = addr_of_mut!(self.inner.drbg_data).cast();
+    }
+
+    /// Returns a pointer to the underlying `WC_RNG`, valid for wolfcrypt calls made while the
+    /// mutable borrow of `self` is held.
+    #[inline]
+    pub(crate) const fn as_mut_ptr(&mut self) -> *mut WC_RNG {
+        self.anchor();
+        addr_of_mut!(self.inner)
     }
 
     /// Fill `bytes` with random values
@@ -163,7 +194,7 @@ impl Rng {
     /// # Panics
     ///
     /// - The length of the `bytes` was greater than the NIST DRBG max request length (0x10000)
-    /// - The underlying Hash_gen returned `DRBG_CONT_FAILURE`
+    /// - The underlying `Hash_gen` returned `DRBG_CONT_FAILURE`
     /// - Default error. rng’s status originally not ok, or set to `DRBG_FAILED`
     ///
     /// If panicking is unacceptable for your use case, which in general is true, please see the
@@ -183,7 +214,7 @@ impl Rng {
     ///
     /// [`try_fill_bytes`]: Self::try_fill_bytes
     /// [`fill_bytes_sized`]: Self::fill_bytes_sized
-    #[cfg(feature = "panic-api")]
+    #[cfg(feature = "can-panic")]
     #[track_caller]
     pub fn fill_bytes(&mut self, bytes: &mut [u8]) {
         if self.try_fill_bytes(bytes).is_err() {
@@ -200,7 +231,7 @@ impl Rng {
     /// # Errors
     ///
     /// - The length of the `bytes` was greater than the NIST DRBG max request length (0x10000)
-    /// - The underlying Hash_gen returned `DRBG_CONT_FAILURE`
+    /// - The underlying `Hash_gen` returned `DRBG_CONT_FAILURE`
     /// - Default error. rng’s status originally not ok, or set to `DRBG_FAILED`
     ///
     /// ```
@@ -239,7 +270,7 @@ impl Rng {
     /// # Errors
     ///
     /// - The length of the `bytes` was greater than the NIST DRBG max request length (0x10000)
-    /// - The underlying Hash_gen returned `DRBG_CONT_FAILURE`
+    /// - The underlying `Hash_gen` returned `DRBG_CONT_FAILURE`
     /// - Default error. rng’s status originally not ok, or set to `DRBG_FAILED`
     ///
     /// # Example
@@ -280,7 +311,7 @@ impl Rng {
     /// # Errors
     ///
     /// - The length of the `bytes` was greater than the NIST DRBG max request length (0x10000)
-    /// - The underlying Hash_gen returned `DRBG_CONT_FAILURE`
+    /// - The underlying `Hash_gen` returned `DRBG_CONT_FAILURE`
     /// - Default error. rng’s status originally not ok, or set to `DRBG_FAILED`
     ///
     /// # Example
@@ -303,9 +334,9 @@ impl Rng {
     /// # drop(key); drop(iv); // no warnings for unused.
     /// ```
     #[inline]
-    pub fn random_array<const C: usize>(&mut self) -> Result<[u8; C], ()> {
+    pub fn random_array<const C: usize>(&mut self) -> Result<[u8; C], Unspecified> {
         if !fill_predicate_sized::<C>() {
-            return Err(())
+            return Err(Unspecified)
         }
 
         let mut buf = [0u8; C];
@@ -332,13 +363,12 @@ impl Rng {
     ///
     /// This is since the length is cast to a `word32` without any checks, in the case that this
     /// overflows, while unlikely, could be problematic.
-    #[no_mangle]
     pub unsafe fn fill_bytes_unchecked(&mut self, bytes: &mut [u8]) -> Res {
         let mut res = Res::new();
         let len = bytes.len() as u32;
 
         res.ensure_0(wc_RNG_GenerateBlock(
-            addr_of_mut!(self.inner),
+            self.as_mut_ptr(),
             bytes.as_mut_ptr(),
             len
         ));
@@ -372,7 +402,11 @@ impl Drop for Rng {
 
             // We will debug assert this to increase our confidence in these claims post long-term
             // fuzzing.
-            let _res = wc_FreeRng(addr_of_mut!(self.inner));
+            //
+            // `as_mut_ptr` re-anchors the `drbg` pointer, without this `wc_FreeRng` would zero
+            // (via `Hash_DRBG_Uninstantiate`) wherever the `Rng` was initialized, rather than
+            // the `Rng`'s own state.
+            let _res = wc_FreeRng(self.as_mut_ptr());
             debug_assert_eq!(_res, 0);
         }
     }
@@ -392,6 +426,27 @@ unsafe impl Sync for Rng {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn survives_moves() {
+        // Under `WOLFSSL_NO_MALLOC` the `WC_RNG` points into itself, moving the `Rng` must not
+        // leave wolfcrypt using a stale location.
+        fn moved(rng: Rng) -> Rng { rng }
+
+        let mut rngs = [Rng::new().unwrap(), Rng::new().unwrap()];
+        let a = rngs[1].random_array::<64>().unwrap();
+        let [first, second] = rngs;
+        let mut second = moved(second);
+        let b = second.random_array::<64>().unwrap();
+        assert_ne!(a, b);
+        assert_eq!(
+            second.inner.drbg.cast::<u8>(),
+            addr_of_mut!(second.inner.drbg_data).cast::<u8>()
+        );
+
+        let mut first = moved(first);
+        assert!(first.random_array::<32>().is_ok());
+    }
 
     #[test]
     fn fill_small() {

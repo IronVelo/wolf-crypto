@@ -26,3 +26,10 @@ path = "fuzz_targets/hex.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ecc_decode"
+path = "fuzz_targets/ecc_decode.rs"
+test = false
+doc = false
+bench = false

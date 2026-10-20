@@ -3,3 +3,4 @@ pub trait AadSealed {}
 pub trait HmacSealed {}
 pub trait HmacDigestSealed {}
 pub trait FipsSealed {}
+pub trait EccSealed {}

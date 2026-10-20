@@ -28,8 +28,7 @@ llvm-assume = []
 default = ["can-panic", "allow-non-fips"]
 
 [dependencies]
-wolf-crypto-sys = { version = "0.1.0-alpha.4" }
-# wolf-crypto-sys = { path = "../wolf-crypto-sys" }
+wolf-crypto-sys = { version = "0.1.0-alpha.4", path = "../wolf-crypto-sys" }
 zeroize = { version = "1.8.1" }
 embedded-io = { version = "0.6.1", optional = true }
 
@@ -54,6 +53,8 @@ poly1305 = "0.8.0"
 hmac = "0.12.1"
 pbkdf2 = { version = "0.12.2", features = ["hmac"] }
 hkdf = "0.12.4"
+p256 = { version = "0.13.2", features = ["ecdsa", "ecdh"] }
+p384 = { version = "0.13.1", features = ["ecdsa", "ecdh"] }
 
 [[bench]]
 name = "aes-gcm"

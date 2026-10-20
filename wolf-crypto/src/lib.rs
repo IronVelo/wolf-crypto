@@ -78,8 +78,7 @@ pub mod buf;
 pub mod opaque_res;
 mod sealed;
 
-// TODO: FURTHER TESTING.
-// pub mod random;
+pub mod random;
 pub mod aes;
 pub mod hash;
 mod error;
@@ -92,6 +91,7 @@ pub mod aead;
 pub mod mac;
 pub(crate) mod ct;
 pub mod kdf;
+pub mod ecc;
 
 pub use ct::ct_eq;
 

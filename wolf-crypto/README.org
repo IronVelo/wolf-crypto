@@ -113,7 +113,7 @@ The Rust code of this library is under the MIT license. It links wolfSSL's =wolf
 (through =wolf-crypto-sys=), which is under GPL-2.0-or-later unless you have a commercial
 license from wolfSSL; the combined work is subject to wolfcrypt's license.
 
-* Roadmap [2/6]
+* Roadmap [2/7]
 
 - [X] Hashing [6/6]
   - [X] SHA2 [6/6]
@@ -204,5 +204,21 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
   - [X] PBKDF2
   - [ ] PKCS12 PBKDF
 
-- [ ] Writing the Remaining Sections (asymmetric, password, padding, etc)
+- [-] Asymmetric [1/2]
+  - [X] ECC (NIST prime curves) [2/2]
+    - [X] P-256 [4/4]
+      - [X] Key generation, private key import / export
+      - [X] Public key import / export (uncompressed SEC1, SubjectPublicKeyInfo DER),
+            with full public-key validation
+      - [X] ECDH (SP 800-56A ECC CDH primitive, ephemeral-unified)
+      - [X] ECDSA with SHA-256 (raw r||s and DER signatures)
+    - [X] P-384 [4/4]
+      - [X] Key generation, private key import / export
+      - [X] Public key import / export (uncompressed SEC1, SubjectPublicKeyInfo DER),
+            with full public-key validation
+      - [X] ECDH (SP 800-56A ECC CDH primitive, ephemeral-unified)
+      - [X] ECDSA with SHA-384 (raw r||s and DER signatures)
+  - [ ] Remaining asymmetric algorithms (not yet scoped)
+
+- [ ] Writing the Remaining Sections (password, padding, etc)
 

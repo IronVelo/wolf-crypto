@@ -47,6 +47,11 @@ fn main() {
         .clang_arg("-DTFM_TIMING_RESISTANT")
         .clang_arg("-DWC_RSA_BLINDING")
         .clang_arg("-DECC_TIMING_RESISTANT")
+        .clang_arg("-DHAVE_ECC")
+        .clang_arg("-DECC_USER_CURVES")
+        .clang_arg("-DHAVE_ECC384")
+        .clang_arg("-DECC_MIN_KEY_SZ=256")
+        .clang_arg("-DECC_SHAMIR")
         .clang_arg("-DHAVE_AESGCM")
         .clang_arg("-DWOLFSSL_AES_COUNTER")
         .clang_arg("-DWOLFSSL_AES_CBC_LENGTH_CHECKS")
@@ -91,7 +96,7 @@ fn main() {
             let path = entry.path();
             match path.extension().and_then(|ext| ext.to_str()) {
                 Some("S") if !matches!(path_fname!(path), "sp_sm2_x86_64_asm.S") => Some(SourceFile::Asm(path)),
-                Some("c") if !matches!(path_fname!(path), "evp.c" | "misc.c" | "tfm.c") => Some(SourceFile::C(path)),
+                Some("c") if !matches!(path_fname!(path), "evp.c" | "misc.c") => Some(SourceFile::C(path)),
                 _ => None,
             }
         })
@@ -109,6 +114,11 @@ fn main() {
         .define("USE_FAST_MATH", None)
         .define("TFM_TIMING_RESISTANT", None)
         .define("ECC_TIMING_RESISTANT", None)
+        .define("HAVE_ECC", None)
+        .define("ECC_USER_CURVES", None)
+        .define("HAVE_ECC384", None)
+        .define("ECC_MIN_KEY_SZ", Some("256"))
+        .define("ECC_SHAMIR", None)
         .define("WC_RSA_BLINDING", None)
         .define("HAVE_AESGCM", None)
         .define("HAVE_AES_DECRYPT", None)

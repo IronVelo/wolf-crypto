@@ -33,7 +33,7 @@ for why they are valid.
 
 * Checklist
 
-Right now, since we make minimal assumptions, there is only one thing to ensure on each update.
+Right now, since we make minimal assumptions, there are only a few things to ensure on each update.
 If we are forced to continue making assumptions this list will expand. On every update of
 =wolfcrypt= we will need to check every item of this checklist prior to updating our Rust API.
 
@@ -53,6 +53,64 @@ If we are forced to continue making assumptions this list will expand. On every 
   - [[https://github.com/wolfSSL/wolfssl/blob/master/wolfcrypt/src/md5.c#L541][MD5 (MD4 etc does not have a Copy impl)]]
 
   Blake2 does not include a Copy impl.
+
+- Ensure that, under =WOLFSSL_NO_MALLOC= (and without =WOLFSSL_STATIC_MEMORY=), =WC_RNG= still
+  stores its DRBG state inline in =WC_RNG::drbg_data= and that =WC_RNG::drbg= only ever points at
+  that field (or is null). =_InitRng= sets =rng->drbg = &rng->drbg_data= ([[file:wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/random.c][random.c]],
+  =_InitRng=), which makes the =WC_RNG= self-referential, and Rust moves values freely. =random::Rng=
+  therefore re-points =drbg= at its own =drbg_data= before every call into wolfcrypt (=Rng::anchor=,
+  used by =Rng::as_mut_ptr= and =Drop=). Without this, a moved =Rng= makes wolfcrypt read and write
+  (and on free, zero) the memory where the =Rng= was first initialized.
+
+  Check that:
+  - =drbg= is only assigned in =_InitRng= (to =&rng->drbg_data= or null on failure) and in
+    =wc_FreeRng= (null), and that no other pointer into the =WC_RNG= is stored anywhere;
+  - the field names =drbg= and =drbg_data= are unchanged (otherwise the build fails, which is fine).
+
+- Ensure that =ecc_key= (and =ecc_point=, =mp_int= / =fp_int=) remain plain data under our
+  configuration: no pointers into the key itself and no owned allocations. =ecc::Key= is moved by
+  Rust, and bitwise copied (=Key::copy=) to call functions which take a non-const =ecc_key*= from a
+  shared reference: =wc_ecc_verify_hash= (writes =key->state=), =wc_ecc_export_x963=,
+  =wc_ecc_export_private_only=, =wc_EccPublicKeyToDer=, and the peer key of
+  =wc_ecc_shared_secret=. The copies are zeroed on drop.
+
+  The current struct only holds =dp= (pointer to the static =ecc_sets= table), =heap= (null),
+  =rng= (see below) and inline big integers. Any of these defines would break the assumption and
+  must not be enabled without revisiting =ecc::Key=: =ALT_ECC_SIZE= (=ecc_point= points into
+  itself), =WOLFSSL_SMALL_STACK_CACHE= (=t1=, =t2=, =pubkey.key= back-pointer),
+  =WOLFSSL_ECDSA_SET_K= / =WOLFSSL_ECDSA_DETERMINISTIC_K= without =WOLFSSL_NO_MALLOC= (heap
+  =sign_k=), =WOLFSSL_ASYNC_CRYPT=, =WC_ECC_NONBLOCK=, =WOLF_CRYPTO_CB= and the hardware back-ends
+  (device contexts and handles), =WOLFSSL_CUSTOM_CURVES= (=deallocSet=, allocated curve parameters).
+
+- Ensure that the =rng= stored by =wc_ecc_set_rng= is only used by the calls made while it is set.
+  =PrivateKey::diffie_hellman= sets it to the caller's (mutably borrowed) =Rng= for one
+  =wc_ecc_shared_secret= call and resets it to null afterwards. Check that no other function we call
+  on a private key dereferences =key->rng= (currently: =wc_ecc_shared_secret_gen_sync= requires it
+  under =ECC_TIMING_RESISTANT=; =ecc_check_privkey_gen= and =ecc_blind_k_rng= use it when set, but
+  are not compiled in our configuration; signing, key generation and =wc_ecc_make_pub_ex= take
+  the rng as an argument).
+
+- Ensure that =wc_ecc_shared_secret= still does not need its own validation of the peer key.
+  It does not validate the public point; we rely on =ecc::PublicKey= only being constructible
+  through =wc_ecc_check_key= (full validation, SP 800-56A rev. 3 5.6.2.3.3, which requires
+  =HAVE_ECC_CHECK_PUBKEY_ORDER=, defined in =ecc.c= for software fast math builds), or from a
+  validated =PrivateKey=. Check that =wc_ecc_check_key= still performs the infinity, range,
+  on-curve and order checks, and the private key range check =[1, n - 1]= for private keys.
+
+- Ensure that =wc_EccPublicKeyDecode= only accepts named curves in our build (no
+  =WOLFSSL_CUSTOM_CURVES=) and still reports the consumed length through =inOutIdx=. We require the
+  whole input to be consumed and the curve (=wc_ecc_get_curve_id(key->idx)=, reading the public
+  =idx= field) to be the expected one. =wc_ecc_sig_to_rs= may accept non-canonical encodings,
+  =ecc::Signature::from_der= re-encodes and compares, so this does not need to hold.
+
+- Key generation self-tests. =WOLFSSL_VALIDATE_ECC_KEYGEN= (and FIPS v5+, which forces it) runs
+  =_ecc_pairwise_consistency_test= after =wc_ecc_make_key_ex=, which allocates its signature buffer
+  with =XMALLOC= and therefore always fails with =MEMORY_E= under =WOLFSSL_NO_MALLOC=. We do not
+  define it; =PrivateKey::generate= instead runs =wc_ecc_check_key= on the new key. A FIPS bundle
+  build with =WOLFSSL_NO_MALLOC= needs this resolved (static memory or a wolfSSL change) before ECC
+  key generation can work there. Check on update whether the pairwise test still allocates.
+
+The ECC and RNG items above were checked against the vendored sources on 2026-10-20.
 
 * Current wolfcrypt Version
 
