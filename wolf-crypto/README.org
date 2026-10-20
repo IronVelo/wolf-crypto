@@ -113,7 +113,7 @@ The Rust code of this library is under the MIT license. It links wolfSSL's =wolf
 (through =wolf-crypto-sys=), which is under GPL-2.0-or-later unless you have a commercial
 license from wolfSSL; the combined work is subject to wolfcrypt's license.
 
-* Roadmap [2/7]
+* Roadmap [2/8]
 
 - [X] Hashing [6/6]
   - [X] SHA2 [6/6]
@@ -203,6 +203,13 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
   - [X] PBKDF1
   - [X] PBKDF2
   - [ ] PKCS12 PBKDF
+
+- [-] Key Wrapping [1/2]
+  - [X] AES-KW (SP 800-38F, RFC 3394) [3/3]
+    - [X] 256
+    - [X] 192
+    - [X] 128
+  - [ ] AES-KWP (SP 800-38F, RFC 5649), not implemented by the vendored =wolfcrypt=
 
 - [-] Asymmetric [1/2]
   - [X] ECC (NIST prime curves) [2/2]

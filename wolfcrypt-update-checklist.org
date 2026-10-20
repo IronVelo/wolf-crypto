@@ -112,6 +112,31 @@ If we are forced to continue making assumptions this list will expand. On every 
 
 The ECC and RNG items above were checked against the vendored sources on 2026-10-20.
 
+- Ensure that the AES key wrap functions (=HAVE_AES_KEYWRAP=, [[file:wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/aes.c][aes.c]]) keep the contract
+  =aes::kw= relies on:
+  - =wc_AesKeyWrap_ex= writes exactly =inSz + 8= bytes of =out= and returns =inSz + 8=;
+    =wc_AesKeyUnWrap_ex= writes exactly =inSz - 8= bytes and returns =inSz - 8=, or
+    =BAD_KEYWRAP_IV_E= when the integrity check value does not match. A null =iv= selects the
+    default ICV (=0xA6= * 8) in both.
+  - On an integrity failure =wc_AesKeyUnWrap_ex= has already written the unauthenticated plaintext
+    to =out=. =Kek::unwrap= zeroes its output buffer on every error; check that the function still
+    never writes outside =out[..inSz - 8]=.
+  - =wc_AesFree= does not clear the key schedule in our configuration, =aes::kw= therefore keeps the
+    =Aes= on its own frame and zeroes it after =wc_AesFree= (=with_schedule=). If =wc_AesFree= starts
+    owning resources (e.g. =WOLFSSL_AESGCM_STREAM= with =WOLFSSL_SMALL_STACK=, device back-ends),
+    zeroing after it is still correct, but =Aes= must remain plain data for =zeroize_flat_type=.
+  - Known weaknesses of the current implementation, to recheck on update: the ICV comparison in
+    =wc_AesKeyUnWrap_ex= is =XMEMCMP= (not constant time), and its stack temporary =tmp= keeps the
+    first recovered plaintext semiblock after return (it is not cleared). Neither can be fixed
+    without reimplementing the mode; prefer a =wolfcrypt= version which uses =ConstantCompare= and
+    =ForceZero= if one becomes available.
+  - KWP (SP 800-38F section 6.3, RFC 5649) is not implemented by the vendored =wolfcrypt=. If an
+    update adds it, it can be exposed alongside KW.
+  - =WOLFSSL_AES_DIRECT= and =HAVE_AES_KEYWRAP= do not change the layout of =struct Aes= (bindgen
+    and the C build both define them, but this must stay true for any define only given to one).
+
+The AES key wrap items above were checked against the vendored sources on 2026-10-20.
+
 * Current wolfcrypt Version
 
 - Last verified against: =5.7.2=

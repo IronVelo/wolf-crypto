@@ -7,6 +7,7 @@
     3.  [Requirements To Run Tests](#orgafb45e2)
 2.  [HMAC](#org73d97ab)
 3.  [ECC (ECDSA and ECC CDH)](#orgecc0001)
+4.  [AES Key Wrap (KW)](#orgkw00001)
 
 
 <a id="orgb5a06e6"></a>
@@ -123,3 +124,40 @@ The tests cover:
     against RustCrypto).
 -   PKV: public key validation accepts exactly the valid keys.
 -   ECC CDH: importing `dIUT` derives `QIUT`, and the shared secret with `QCAVS` is `ZIUT`.
+
+
+<a id="orgkw00001"></a>
+
+# AES Key Wrap (KW)
+
+`nist_kw.rs` runs the CAVP KWVS vectors for `aes::kw`. The forward-cipher KW files are committed whole under
+`vectors/kw/` and the tests run offline.
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr><th scope="col" class="org-left">File</th><th scope="col" class="org-left">Source file in the CAVP zip</th><th scope="col" class="org-left">Sections kept</th></tr>
+</thead>
+<tbody>
+<tr><td class="org-left"><code>vectors/kw/KW_AE_128.txt</code></td><td class="org-left"><code>kwtestvectors/KW_AE_128.txt</code></td><td class="org-left">all</td></tr>
+<tr><td class="org-left"><code>vectors/kw/KW_AE_192.txt</code></td><td class="org-left"><code>kwtestvectors/KW_AE_192.txt</code></td><td class="org-left">all</td></tr>
+<tr><td class="org-left"><code>vectors/kw/KW_AE_256.txt</code></td><td class="org-left"><code>kwtestvectors/KW_AE_256.txt</code></td><td class="org-left">all</td></tr>
+<tr><td class="org-left"><code>vectors/kw/KW_AD_128.txt</code></td><td class="org-left"><code>kwtestvectors/KW_AD_128.txt</code></td><td class="org-left">all</td></tr>
+<tr><td class="org-left"><code>vectors/kw/KW_AD_192.txt</code></td><td class="org-left"><code>kwtestvectors/KW_AD_192.txt</code></td><td class="org-left">all</td></tr>
+<tr><td class="org-left"><code>vectors/kw/KW_AD_256.txt</code></td><td class="org-left"><code>kwtestvectors/KW_AD_256.txt</code></td><td class="org-left">all</td></tr>
+</tbody>
+</table>
+
+Source (fetched 2026-10-20):
+
+-   [kwtestvectors.zip](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/kwtestvectors.zip),
+    SHA-256 `04a4a82e4de65bca505125295003f9c75a5a815afda046dc83661b8b580dfdf3`
+
+The files are byte-for-byte copies. Not kept: the `_inv` files (KW with the AES inverse cipher as the forward
+function, not offered by `wolfcrypt`), the KWP files (KWP is not implemented by the vendored `wolfcrypt`) and the
+TDEA `TKW` files.
+
+The tests cover, for AES-128, AES-192 and AES-256 and every plaintext length (128, 192, 256, 320 and 4096 bits,
+100 cases each):
+
+-   KW-AE: wrapping `P` under `K` gives `C`.
+-   KW-AD: unwrapping `C` under `K` gives `P`, or fails for the cases marked `FAIL` (20 per plaintext length).

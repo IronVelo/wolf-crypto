@@ -91,3 +91,33 @@ The tests cover:
   against RustCrypto).
 - PKV: public key validation accepts exactly the valid keys.
 - ECC CDH: importing =dIUT= derives =QIUT=, and the shared secret with =QCAVS= is =ZIUT=.
+
+* AES Key Wrap (KW)
+
+=nist_kw.rs= runs the CAVP KWVS vectors for =aes::kw=. The forward-cipher KW files are committed whole under
+=vectors/kw/= and the tests run offline.
+
+| File                       | Source file in the CAVP zip         | Sections kept |
+|----------------------------+-------------------------------------+---------------|
+| =vectors/kw/KW_AE_128.txt= | =kwtestvectors/KW_AE_128.txt=       | all           |
+| =vectors/kw/KW_AE_192.txt= | =kwtestvectors/KW_AE_192.txt=       | all           |
+| =vectors/kw/KW_AE_256.txt= | =kwtestvectors/KW_AE_256.txt=       | all           |
+| =vectors/kw/KW_AD_128.txt= | =kwtestvectors/KW_AD_128.txt=       | all           |
+| =vectors/kw/KW_AD_192.txt= | =kwtestvectors/KW_AD_192.txt=       | all           |
+| =vectors/kw/KW_AD_256.txt= | =kwtestvectors/KW_AD_256.txt=       | all           |
+
+Source (fetched 2026-10-20):
+
+- [[https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/kwtestvectors.zip][kwtestvectors.zip]],
+  SHA-256 =04a4a82e4de65bca505125295003f9c75a5a815afda046dc83661b8b580dfdf3=
+
+The files are byte-for-byte copies. Not kept: the =_inv= files (KW with the AES inverse cipher as the forward
+function, not offered by =wolfcrypt=), the KWP files (KWP is not implemented by the vendored =wolfcrypt=) and the
+TDEA =TKW= files.
+
+The tests cover, for AES-128, AES-192 and AES-256 and every plaintext length (128, 192, 256, 320 and 4096 bits,
+100 cases each):
+
+- KW-AE: wrapping =P= under =K= gives =C=.
+- KW-AD: unwrapping =C= under =K= gives =P=, or fails for the cases marked =FAIL= (20 per plaintext length).
+
