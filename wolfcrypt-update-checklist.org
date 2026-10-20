@@ -145,6 +145,56 @@ If we are forced to continue making assumptions this list will expand. On every 
 
 The ECC and RNG items above were checked against the vendored sources on 2026-10-20.
 
+- Ensure that the AES key wrap functions (=HAVE_AES_KEYWRAP=, [[file:wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/aes.c][aes.c]]) keep the contract
+  =aes::kw= relies on:
+  - =wc_AesKeyWrap_ex= writes exactly =inSz + 8= bytes of =out= and returns =inSz + 8=;
+    =wc_AesKeyUnWrap_ex= writes exactly =inSz - 8= bytes and returns =inSz - 8=, or
+    =BAD_KEYWRAP_IV_E= when the integrity check value does not match. A null =iv= selects the
+    default ICV (=0xA6= * 8) in both.
+  - On an integrity failure =wc_AesKeyUnWrap_ex= has already written the unauthenticated plaintext
+    to =out=. =Kek::unwrap= zeroes its output buffer on every error; check that the function still
+    never writes outside =out[..inSz - 8]=.
+  - =wc_AesFree= does not clear the key schedule in our configuration, =aes::kw= therefore keeps the
+    =Aes= on its own frame and zeroes it after =wc_AesFree= (=with_schedule=, through
+    =aes::free_aes=). If =wc_AesFree= starts owning resources (e.g. =WOLFSSL_AESGCM_STREAM= with
+    =WOLFSSL_SMALL_STACK=, device back-ends), zeroing after it is still correct, but =Aes= must
+    remain plain data for =zeroize_flat_type=.
+  - Known weaknesses of the current implementation, to recheck on update: the ICV comparison in
+    =wc_AesKeyUnWrap_ex= is =XMEMCMP= (not constant time), and its stack temporary =tmp= keeps the
+    first recovered plaintext semiblock after return (it is not cleared). Neither can be fixed
+    without reimplementing the mode; prefer a =wolfcrypt= version which uses =ConstantCompare= and
+    =ForceZero= if one becomes available.
+  - KWP (SP 800-38F section 6.3, RFC 5649) is not implemented by the vendored =wolfcrypt=. If an
+    update adds it, it can be exposed alongside KW.
+  - =WOLFSSL_AES_DIRECT= and =HAVE_AES_KEYWRAP= do not change the layout of =struct Aes= (bindgen
+    and the C build both define them, but this must stay true for any define only given to one).
+
+The AES key wrap items above were checked against the vendored sources on 2026-10-20.
+
+- Ensure that =random::Rng= is still a Hash_DRBG, which its =Fips= marker relies on. This holds while
+  =HAVE_HASHDRBG= is the generator: =CUSTOM_RAND_GENERATE_BLOCK=, =WC_NO_HASHDRBG= or
+  =HAVE_INTEL_RDRAND= (which bypasses the DRBG in =_InitRng= and =wc_RNG_GenerateBlock=, and makes
+  =wc_RNG_DRBG_Reseed= a successful no-op) must not be enabled without revisiting the marker and
+  =Rng::reseed=.
+
+- Ensure that the DRBG functions behind =random::hash_drbg= and =random::kat= keep their contract
+  ([[file:wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/random.c][random.c]]):
+  - =wc_InitRngNonce= only reads the nonce (the parameter is not =const=) and passes it to
+    =Hash_DRBG_Instantiate= as the nonce. With a caller nonce it draws =SEED_SZ= entropy bytes and no
+    nonce of its own (=SEED_SZ + SEED_SZ / 2= without), so =Rng::with_nonce= requires at least 16 bytes.
+  - =wc_RNG_DRBG_Reseed= does not check the entropy length nor the generator status, and returns 0
+    (=DRBG_SUCCESS=) or a non-zero error. =Rng::reseed= enforces at least 32 bytes and runs
+    =wc_RNG_TestSeed= first; check that =wc_RNG_TestSeed= still only reads =seedSz= bytes and needs
+    =seedSz > SEED_BLOCK_SZ=.
+  - =wc_RNG_HealthTest_ex= instantiates (entropy A, nonce), optionally reseeds (entropy B), generates
+    twice and returns the second block, requires =outputSz == RNG_HEALTH_TEST_CHECK_SIZE= (128) and
+    uninstantiates its DRBG on every path. It takes no personalization string nor additional input,
+    which limits =random::kat= (and the CAVP sections tested) accordingly.
+  - =WC_RNG_SEED_CB= is not defined. Its seed callback is process global (=wc_SetSeed_Cb=), so it is
+    not exposed; enabling it changes the entropy source of every =Rng=.
+
+The DRBG items above were checked against the vendored sources on 2026-10-20.
+
 * Current wolfcrypt Version
 
 - Last verified against: =5.7.2=

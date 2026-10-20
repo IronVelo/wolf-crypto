@@ -14,7 +14,7 @@
 4.  [Ongoing Testing Priorities](#org44d9ede)
 5.  [Current Priorities](#orge1265ef)
 6.  [License](#org73b40d6)
-7.  [Roadmap <code>[2/7]</code>](#org6c915ae)
+7.  [Roadmap <code>[3/9]</code>](#org6c915ae)
 
 **WARNING - THIS LIBRARY IS IN ITS EARLY STAGES, IT IS NOT READY FOR PRODUCTION USE, USE AT YOUR OWN RISK.**
 
@@ -173,7 +173,7 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
 
 <a id="org6c915ae"></a>
 
-# Roadmap <code>[2/7]</code>
+# Roadmap <code>[3/9]</code>
 
 -   [X] Hashing <code>[6/6]</code>
     -   [X] SHA2 <code>[6/6]</code>
@@ -269,6 +269,19 @@ license from wolfSSL; the combined work is subject to wolfcrypt's license.
     `allow-non-fips` feature and does not implement the `Fips` marker, because the current validated
     wolfCrypt FIPS 140-3 module (certificate #5548, wolfCrypt 5.2.3) does not approve PBKDF2; a later
     module may.
+
+-   [X] Random Bit Generation <code>[1/1]</code>
+    -   [X] Hash_DRBG (SP 800-90A, SHA-256) <code>[3/3]</code>
+        -   [X] Generation, seeded from the operating system
+        -   [X] Caller-provided nonce on instantiation, reseeding with caller-provided entropy
+        -   [X] Known-answer tests of the mechanism (NIST CAVP)
+
+-   [-] Key Wrapping <code>[1/2]</code>
+    -   [X] AES-KW (SP 800-38F, RFC 3394) <code>[3/3]</code>
+        -   [X] 256
+        -   [X] 192
+        -   [X] 128
+    -   [ ] AES-KWP (SP 800-38F, RFC 5649), not implemented by the vendored `wolfcrypt`
 
 -   [-] Asymmetric <code>[1/2]</code>
     -   [X] ECC (NIST prime curves) <code>[2/2]</code>

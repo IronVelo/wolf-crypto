@@ -72,7 +72,9 @@ fn main() {
         .clang_arg("-DHAVE_CHACHA")
         .clang_arg("-DHAVE_POLY1305")
         .clang_arg("-DHAVE_HKDF")
-        .clang_arg("-DHAVE_PBKDF2");
+        .clang_arg("-DHAVE_PBKDF2")
+        .clang_arg("-DWOLFSSL_AES_DIRECT")
+        .clang_arg("-DHAVE_AES_KEYWRAP");
         //.clang_arg("-DHAVE_FIPS");
 
     // if is_x86_target() {
@@ -141,7 +143,9 @@ fn main() {
         .define("HAVE_CHACHA", None)
         .define("HAVE_POLY1305", None)
         .define("HAVE_HKDF", None)
-        .define("HAVE_PBKDF2", None);
+        .define("HAVE_PBKDF2", None)
+        .define("WOLFSSL_AES_DIRECT", None)
+        .define("HAVE_AES_KEYWRAP", None);
         // .define("HAVE_FIPS", None);
 
     // if is_x86_target() {

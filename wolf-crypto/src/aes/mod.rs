@@ -19,6 +19,8 @@ hidden! {
     pub mod ctr;
 }
 
+pub mod kw;
+
 pub use { crate::aes::ctr::AesCtr };
 
 #[cfg(test)]

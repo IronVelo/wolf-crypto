@@ -85,11 +85,32 @@ const fn fill_predicate_sized<const C: usize>() -> bool {
     C <= MAX_REQUEST_SIZE
 }
 
+mod hash_drbg;
+pub mod kat;
+
+pub use hash_drbg::{SECURITY_STRENGTH, MIN_ENTROPY_SIZE, MIN_NONCE_SIZE};
+
 /// Random Bit Generator
 ///
 /// `Rng` is a safe zero-cost abstraction over wolfcrypt's `WC_RNG`, with a convenient interface
 /// for generating key material, initialization vectors, or simply filling some slice with random
 /// bytes.
+///
+/// # Mechanism
+///
+/// `Rng` is the NIST SP 800-90A `Hash_DRBG` with SHA-256 ([`SECURITY_STRENGTH`] of 256 bits), an
+/// approved DRBG, and is therefore marked [`Fips`](crate::Fips). It is seeded from the
+/// operating system's entropy source and reseeded automatically; it can also be instantiated
+/// with a caller-provided nonce ([`Rng::with_nonce`]) and reseeded with caller-provided entropy
+/// ([`Rng::reseed`]). FIPS 140-3 additionally requires a validated entropy source, which is a
+/// property of the platform rather than of this type. The mechanism itself is tested against
+/// the NIST CAVP vectors through [`kat::hash_drbg_sha256`].
+///
+/// ```
+/// use wolf_crypto::{ensure_fips, random::Rng};
+///
+/// ensure_fips::<Rng>();
+/// ```
 ///
 /// # Example
 ///
@@ -153,28 +174,44 @@ impl Rng {
     /// # drop(iv);
     /// ```
     pub fn new() -> Result<Self, Unspecified> {
-        // wolfcrypt instantiates the DRBG directly in the `Rng` which is returned, not in a
-        // separate `WC_RNG` which is then copied into it (leaving a stale copy of the DRBG
-        // state behind). The returned value may still be moved, see the type's note on moves.
+        unsafe {
+            // SAFETY: `init_rng_in_place` initializes the `WC_RNG` iff its result is OK, and
+            // only writes to the provided `WC_RNG`.
+            Self::init_in_place(|rng| init_rng_in_place(rng))
+        }
+    }
+
+    /// Instantiate an `Rng` in place with `init`, zeroing its storage if `init` fails.
+    ///
+    /// wolfcrypt instantiates the DRBG directly in the `Rng` which is returned, not in a
+    /// separate `WC_RNG` which is then copied into it (leaving a stale copy of the DRBG state
+    /// behind). The returned value may still be moved, see the type's note on moves.
+    ///
+    /// # Safety
+    ///
+    /// `init` is given a pointer valid for writes of a `WC_RNG` (zeroed). It must only write to
+    /// that `WC_RNG`, and must have initialized it if (and only if) it returns OK.
+    #[inline(always)]
+    unsafe fn init_in_place<F>(init: F) -> Result<Self, Unspecified>
+        where F: FnOnce(*mut WC_RNG) -> Res
+    {
         let mut rng = MaybeUninit::<Self>::zeroed();
 
-        unsafe {
-            // SAFETY: `rng` is valid for writes of a `Rng`, which is a `repr(transparent)`
-            // `WC_RNG`. `wc_InitRng` only writes to the provided `WC_RNG`.
-            let res = init_rng_in_place(addr_of_mut!((*rng.as_mut_ptr()).inner));
+        // SAFETY: `rng` is valid for writes of a `Rng`, which is a `repr(transparent)`
+        // `WC_RNG`; `init` only writes to the provided `WC_RNG` (caller's contract).
+        let res = init(addr_of_mut!((*rng.as_mut_ptr()).inner));
 
-            if res.is_err() {
-                // SAFETY: `WC_RNG` is a flat C struct for which all zeroes is a valid value
-                // (null pointers, zero integers); this clears any partial DRBG state. Nothing
-                // is dropped, the `MaybeUninit` is never assumed initialized.
-                zeroize::zeroize_flat_type(rng.as_mut_ptr().cast::<WC_RNG>());
-            }
-
-            // SAFETY: `rng` is only assumed initialized iff `wc_InitRng` succeeded. Its `drbg`
-            // pointer refers to `drbg_data` at the current location, returning the `Rng` may
-            // move it, every use of `inner` goes through `as_mut_ptr`, which re-anchors it.
-            res.unit_err_with(|| rng.assume_init())
+        if res.is_err() {
+            // SAFETY: `WC_RNG` is a flat C struct for which all zeroes is a valid value
+            // (null pointers, zero integers); this clears any partial DRBG state. Nothing
+            // is dropped, the `MaybeUninit` is never assumed initialized.
+            zeroize::zeroize_flat_type(rng.as_mut_ptr().cast::<WC_RNG>());
         }
+
+        // SAFETY: `rng` is only assumed initialized iff `init` succeeded. Its `drbg` pointer
+        // refers to `drbg_data` at the current location, returning the `Rng` may move it,
+        // every use of `inner` goes through `as_mut_ptr`, which re-anchors it.
+        res.unit_err_with(|| rng.assume_init())
     }
 
     /// Re-point the `drbg` pointer at this `Rng`'s own `drbg_data`.
