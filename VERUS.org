@@ -1,0 +1,288 @@
+#+TITLE: Optional Verus specifications for wolf-crypto
+#+OPTIONS: toc:2 num:t author:nil
+
+* Purpose
+
+wolf-crypto's first line of defence is the type system: typestate, distinct
+key / nonce / tag types, sealed traits, sizes as types, =Fips= markers. Verus
+is a second, optional line: it proves properties the type system cannot
+express (a nonce is never used twice under a key, a buffer is zeroized on
+every failure path, a counter never wraps) for code written against a
+verified API.
+
+Verus is never required. Nothing in this note changes how =wolf-crypto= or
+=wolf-crypto-sys= build, test or behave.
+
+* Layering over FFI
+
+wolfCrypt is C; Verus cannot see into it. Specifications are layered so that
+the trusted part is small, explicit and reviewable:
+
+| Layer                 | Where                         | Status   |
+|-----------------------+-------------------------------+----------|
+| 1. Abstract model     | =wolf-crypto-verus/src/spec.rs= | TRUSTED  |
+| 2. FFI contracts      | =wolf-crypto-verus/src/ffi.rs=  | TRUSTED  |
+| 3. Wrapper logic      | =nonce.rs=, =gcm.rs=, =sealer.rs= | VERIFIED |
+| 4. Verified clients   | callers, =client_checks.rs=    | VERIFIED |
+
+** 1. Abstract model (uninterpreted functions and axioms)
+
+Each primitive is a mathematical function over byte sequences, left
+uninterpreted:
+
+#+begin_src rust
+pub uninterp spec fn aes_gcm_seal(key: Seq<u8>, nonce: Seq<u8>, aad: Seq<u8>,
+                                  pt: Seq<u8>) -> (Seq<u8>, Seq<u8>); // (ct, tag)
+pub uninterp spec fn aes_gcm_open(key: Seq<u8>, nonce: Seq<u8>, aad: Seq<u8>,
+                                  ct: Seq<u8>, tag: Seq<u8>) -> Option<Seq<u8>>;
+#+end_src
+
+The only facts about them are axioms, all functional and all listed as
+trusted (=broadcast group group_aes_gcm_axioms=):
+
+- =axiom_seal_lengths=: =|ct| = |pt|=, =|tag| = 16=.
+- =axiom_open_seal=: correctness, =open(seal(x)) == Some(x)=.
+- =axiom_open_auth= (authentication failure): if =open(K, IV, A, C, T)= is
+  =Some(P)= then =seal(K, IV, A, P) == (C, T)=; anything not in the image of
+  =seal= is rejected. True of GCM because =C = P xor keystream= and the tag is
+  recomputed exactly.
+- =Gcm::axiom_key_valid=: a constructed context holds a 128/192/256-bit key.
+
+Computational security (IND-CPA, INT-CTXT, forgery bounds, the consequences
+of nonce reuse) is deliberately not axiomatised: a functional model cannot
+state it, and pretending otherwise would make the TCB unsound. The point of
+the verified layer is to establish the *preconditions* of the standard GCM
+security theorems (unique nonces, invocation bounds, length limits), not to
+re-prove them.
+
+** 2. FFI contracts (=external_body=)
+
+Each wolf-crypto call is wrapped in one =#[verifier::external_body]=
+function whose =requires= / =ensures= restate the wolf-crypto API in terms of
+the model. Bodies are a single call plus plumbing. Rules:
+
+- Contracts assume no more than wolfCrypt's API guarantees. Where the C code
+  may do something surprising, the contract says less, not more: e.g.
+  =open_raw= leaves =out= unspecified on failure, because by default
+  wolfCrypt's C path decrypts before comparing tags. Any contract that does
+  depend on behaviour beyond the API must get an entry, with its argument,
+  in =wolfcrypt-update-checklist.org= (none does today).
+- External types are =external_body= structs (=Gcm= wraps =AesGcm=) with
+  uninterpreted spec accessors (=Gcm::key()=).
+- =opens_invariants none= and =no_unwind= are stated everywhere; for FFI
+  wrappers they are trusted (wolf-crypto is used with =default-features =
+  false=, so no =can-panic= API is reachable).
+- Protocol disciplines are expressed with *ghost capabilities*: linear
+  =tracked= structs with private fields that verified code cannot forge
+  (=Tracked::assume_new= is not callable from verified code). The trusted
+  contract demands the capability; the verified layer proves it is used
+  correctly.
+
+** 3. Verified wrapper logic
+
+What Verus proves about wolf-crypto's Rust side, per module: lengths and
+casts (=u32= limits), state machines (typestate transitions, streaming
+AEAD phases), zeroization on every exit path, and nonce discipline. Proof
+obligations are mathematical (=Seq=, =Set=, ghost ledgers), following the
+repository's Verus guidance: type invariants exposed through
+=use_type_invariant=, no executable replicas of the model.
+
+** 4. Verified clients
+
+A verified caller gets the guarantees by construction: it cannot call
+=seal_raw= without proving the nonce is fresh. Unverified callers can still
+use the crate (ghost arguments are erased), and the executable checks
+(counter, bounds, zeroization) still hold for them; what they lose is the
+proof that they did not mint capabilities unsoundly.
+
+* What is verified and what stays trusted
+
+** Verified (Verus: 38 verified, 0 errors; no =admit= or =assume=)
+
+- =nonce::encode_counter_nonce= computes exactly =prefix || be64(counter)=;
+  =lemma_counter_nonce_injective=: equal nonces imply equal prefix and
+  counter (bit-vector proof).
+- =gcm::zeroize_slice= and =Gcm::open=: length validation precedes the FFI
+  call; on *every* failure path the output buffer is all zeros; on success
+  =seal(key, nonce, aad, out) == (ct, tag)= (from =axiom_open_auth=).
+- =CounterSealer= type invariant: ledger bound to the context's key,
+  =next <= reserved <= limit <= MAX_INVOCATIONS=, and no counter at or above
+  =next= is in the ledger.
+- =CounterSealer::seal=: every nonce handed to wolfCrypt is fresh for the key
+  (discharges =seal_raw='s precondition); the ledger grows by exactly that
+  nonce; =InvalidLength=, =NeedsReservation= and =Exhausted= use no nonce; a
+  wolfCrypt failure still retires the nonce; the counter never wraps.
+- =CounterSealer::new/resume/extend_reservation=: bounds checked at runtime
+  and exactly characterised in the spec; =lemma_resumed_ledger= proves that a
+  ledger restored from a high-water mark admits starting at that mark.
+- Client checks (=client_checks.rs=, compiled only under =cfg(verus)=): two
+  seals never share a nonce; the generate / reserve / seal / restart / resume
+  flow discharges every ghost obligation.
+- Negative check: with =--features negative-check=, sealing twice with the
+  same nonce *fails* verification at =seal_raw='s
+  =!old(ledger).used().contains(nonce@)= precondition.
+
+** Trusted (the complete list)
+
+- The three GCM axioms and =axiom_key_valid= (=spec.rs=, =ffi.rs=).
+- =Gcm::generate=: the DRBG key is fresh, so its ledger starts empty and no
+  other ledger exists for it (2^-256 collision; computational assumption).
+- =Gcm::resume=: the persistence obligation (below).
+- =Gcm::seal_raw= / =Gcm::open_raw=: wolf-crypto's =try_encrypt= /
+  =try_decrypt= implement SP 800-38D GCM-AE / GCM-AD with a 16-byte tag.
+- =DurableMark::assume_persisted=: the caller has durably stored the mark.
+- =slice_len= (=<[u8]>::len= restated as =no_unwind=; vstd's spec is not) and
+  =zeroize_key_buf= (the =zeroize= crate).
+- Rust drop glue: =AesGcm= and =Key= zeroize key material on drop
+  (=wc_AesFree=, =zeroize=), covered by wolf-crypto's own review, not Verus.
+- Verus, vstd and the Rust compiler.
+
+* AES-GCM prototype: nonce discipline
+
+** Ghost ledger
+
+=NonceLedger= is a linear ghost capability holding =key: Seq<u8>= and
+=used: Set<Seq<u8>>=: every nonce ever used to seal under that key, across
+all process lifetimes. It is minted only by =Gcm::generate= (empty) and
+=Gcm::resume= (bounded by a high-water mark). The trusted seal contract is
+
+#+begin_src rust
+pub fn seal_raw(&mut self, Tracked(ledger): Tracked<&mut NonceLedger>,
+                nonce: &[u8; 12], aad: &[u8], pt: &[u8], ct: &mut [u8])
+    -> (r: Result<[u8; 16], CryptoError>)
+    requires
+        old(ledger).key() == old(self).key(),
+        !old(ledger).used().contains(nonce@),   // the discipline
+        pt@.len() == old(ct)@.len(), pt@.len() <= MAX_MSG_LEN, aad@.len() <= MAX_MSG_LEN,
+    ensures
+        final(ledger).used() == old(ledger).used().insert(nonce@),  // even on error
+        r matches Ok(tag) ==> (final(ct)@, tag@) == aes_gcm_seal(final(self).key(), nonce@, aad@, pt@),
+        ...
+#+end_src
+
+Because the ledger is linear and unforgeable, a verified program cannot seal
+twice with the same =(key, nonce)=: the second call's precondition is false.
+=seal_raw= is public for protocols that dictate nonces (e.g. TLS 1.3's
+XOR-with-sequence-number construction): such callers prove freshness
+themselves.
+
+** Counter construction and exhaustion bound
+
+=CounterSealer= implements SP 800-38D 8.2.1: =nonce = prefix (4 bytes) ||
+counter (8 bytes, big-endian)=. The =prefix= names the sealing context and
+must be unique per key among contexts. Invocation bound: counters
+=0 .. limit-1= with =limit <= MAX_INVOCATIONS = 2^64 - 1=, so =next == limit=
+(exhausted) is representable without overflow; once reached, =seal= returns
+=Exhausted= forever and the key must be rotated. Applications should pick a
+smaller =limit= where policy requires (e.g. 2^32); message length is bounded
+at 2^32 - 1 bytes by wolfCrypt's =word32= lengths, below SP 800-38D's
+2^39 - 256 bits.
+
+** Restarts: the high-water-mark obligation
+
+An in-memory counter is lost on restart; reusing it would repeat nonces. The
+sealer therefore only uses counters below =reserved=, a value the caller has
+made durable. Protocol (caller's obligation):
+
+1. Before using counters in =[reserved, new_mark)=, durably write =new_mark=
+   for the key (write and fsync, or a monotonic hardware counter); then call
+   =DurableMark::assume_persisted(key, prefix, new_mark)= (the single trust
+   point) and =CounterSealer::extend_reservation(new_mark, mark)=. Seal
+   returns =NeedsReservation= when the block is used up. Reserving in blocks
+   (e.g. 2^20) amortises the writes; at most one block is skipped per crash.
+2. After a restart, read the mark back and pass it as =high_water= to
+   =Gcm::resume(key, prefix, high_water)=, which mints a ledger whose =used=
+   set contains only =counter_nonce(prefix, c)= with =c < high_water=; then
+   =CounterSealer::resume(.., high_water, ..)= starts at =high_water=
+   (justified by the proved =lemma_resumed_ledger=).
+
+=Gcm::generate= keys never leave wolfCrypt and are therefore ephemeral; a
+key that must survive restarts is created and stored by the caller's key
+management and always enters through =Gcm::resume= (=high_water = 0= before
+its first use).
+
+The obligation fails if storage can roll back (restored backups, VM
+snapshots, a second process with the same key and prefix). In those
+settings, do not resume: rotate the key, or derive per-boot keys.
+
+** How it is checked
+
+#+begin_src sh
+cd wolf-crypto-verus
+cargo verus verify                           # dependencies (vstd) + this crate
+cargo verus focus                            # this crate only
+cargo verus focus --features negative-check  # must FAIL (nonce reuse)
+cargo build && cargo test                    # plain Rust, no Verus
+#+end_src
+
+=cargo test= runs runtime tests in a normal build: nonce layout, round trip
+and byte-for-byte agreement with RustCrypto's =aes-gcm=, zeroization on a
+failed =open=, reservation and exhaustion behaviour, no wrap at =u64::MAX=.
+
+* Build integration
+
+- *Separate crate.* The verified layer is =wolf-crypto-verus/=, a standalone
+  package with its own =[workspace]= table, depending on =wolf-crypto= by
+  path. It is not a member of the wolf-crypto workspace, so =cargo build= and
+  =cargo test= at the repository root are unchanged.
+- *Why not inside =wolf-crypto=.* =vstd= comes from a local Verus checkout
+  (=../../verus-ref/source/vstd=). Cargo resolves every path
+  dependency, even an optional one, so a =vstd= dependency in =wolf-crypto=
+  would break builds for everyone without that checkout. Beyond that,
+  wolf-crypto's public API is generic over sealed traits (=GenericIv=,
+  =Aad=), uses =unsafe= FFI with raw pointers and declarative macros
+  (=panic_api!=, =mark_fips!=, =non_fips!=); Verus would need
+  =external_trait_specification= for each trait and would still treat the
+  FFI bodies as trusted. Wrapping concrete instantiations from outside gives
+  the same TCB with no change to wolf-crypto.
+- *=cfg(verus)=.* =cargo verus= sets =--cfg verus=; the
+  =verus!= macro erases specs, proofs and ghost state otherwise, and
+  spec-only imports are under =#[cfg(verus)]=. =client_checks= exists only
+  under =cfg(verus)=. =[lints.rust] unexpected_cfgs= declares =cfg(verus)=.
+- *Toolchain.* =rust-toolchain.toml= pins 1.93.0, matching the other
+  Verus-verified crates this layer is meant to be used with.
+  =wolf-crypto-sys= needs =LIBCLANG_PATH= (and, on NixOS,
+  =BINDGEN_EXTRA_CLANG_ARGS= with the clang resource and glibc include dirs)
+  for bindgen, exactly as for the main workspace.
+- *Kani.* Kani stays inside =wolf-crypto= under =cfg(kani)= for pure-Rust
+  code (=ct.rs=, test utilities, Poly1305 helpers): bounded model checking of
+  the implementation itself. Verus works one level up, on the wrapper
+  contracts, in a crate Kani never builds. The two never share a cfg or a
+  proof obligation; when a pure-Rust helper is needed by Verus, its Kani
+  harness is the evidence and Verus takes it as an =external_body= contract
+  (to be recorded in the trusted list).
+
+* Roadmap per module
+
+1. *=aead::AesGcm=* (this prototype). Next: per-prefix ledger splitting so
+   several contexts (threads, devices, directions) share one key with
+   disjoint prefixes (a VerusSync / resource-algebra map from prefix to
+   sub-ledger, with the key-level ledger as authority); a persistence trait
+   whose verified implementation returns =DurableMark= instead of the
+   trusted =assume_persisted=; AES-128/192 =generate=; TLS 1.3 style
+   XOR nonces via =seal_raw=.
+2. *=aead::ChaCha20Poly1305=*: the streaming typestate in
+   =chacha20_poly1305/states.rs= (=Init=, =EncryptMaybeAad=, =EncryptAad=,
+   =Encrypt= and the decrypt counterparts) as a verified state machine; same ledger discipline (96-bit nonces), and
+   XChaCha-style random nonces with an explicit collision budget.
+3. *=aes::AesCtr=*: counter-block discipline (no keystream reuse across
+   calls, 32-bit block-counter overflow bound).
+4. *=mac= (HMAC, Poly1305)*: Poly1305 one-time-key discipline as a linear
+   capability (a key is consumed by =finalize=); tag comparison delegated to
+   =ct_eq= (Kani-checked) via a trusted contract.
+5. *=hash=*: length and state-machine specs (no use after =finalize=),
+   =Clone= soundness tied to the checklist item on =wc_*Copy= not mutating
+   =src=.
+6. *=kdf= (HKDF, PBKDF2)*: output-length bounds (=255 * HashLen=),
+   iteration-count and salt-length policy as verified preconditions.
+7. *=random::Rng=*: request-size bounds (NIST DRBG maximum), reseed
+   accounting.
+8. *=ecc= (P-256/P-384)*: key-validity typestate (public key checked on
+   import), ECDSA nonce handled inside wolfCrypt (trusted, documented),
+   ECDH shared secret zeroization.
+9. *=buf=, =ct=*: zeroization of =Nonce=/=Iv=/=Key= as verified postconditions
+   where the code is pure Rust; =ct_eq= stays Kani-checked.
+
+Long term, layer 1 can be replaced by verified implementations where they
+exist, keeping layers 3 and 4 unchanged; the FIPS 140-3 boundary remains
+wolfCrypt.

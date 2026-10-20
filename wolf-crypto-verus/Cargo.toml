@@ -1,0 +1,30 @@
+[package]
+name = "wolf-crypto-verus"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Optional Verus-verified layer over wolf-crypto (AES-GCM nonce discipline)"
+
+# Standalone on purpose: vstd comes from a local Verus checkout, so this crate
+# is kept out of the wolf-crypto workspace and never affects its builds.
+[workspace]
+
+[dependencies]
+wolf-crypto = { path = "../wolf-crypto", default-features = false }
+vstd = { path = "../../verus-ref/source/vstd", default-features = false }
+zeroize = { version = "1.8.1", default-features = false }
+
+[features]
+# Verification-only: enables a deliberately failing nonce-reuse check in
+# `client_checks` (`cargo verus focus --features negative-check` must fail).
+negative-check = []
+
+[package.metadata.verus]
+verify = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(verus)"] }
+
+[dev-dependencies]
+aes-gcm = "0.10.3"
