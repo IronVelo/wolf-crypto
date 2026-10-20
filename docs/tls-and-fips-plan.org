@@ -1,0 +1,1059 @@
+#+TITLE: wolf-tls (TLS 1.3 peer channel) and the FIPS build path for wolf-crypto
+#+DATE: 2026-10-20
+#+OPTIONS: toc:3 num:t author:nil
+#+STARTUP: showall
+
+Status: design proposal for review. Nothing in this document is implemented;
+it changes no code. Decisions marked =DECISION= are recommendations for the
+maintainer to accept or reject.
+
+* Scope, sources and the state of the crate
+
+This document plans two pieces of work:
+
+- Part A: a TLS 1.3 binding crate (=wolf-tls=) over wolfSSL's TLS layer for
+  IronDB's peer channel, driven sans-I/O through wolfSSL's I/O callbacks,
+  TLS 1.3 only, one suite, one group, mutually authenticated with RFC 7250
+  raw public keys pinned by SPKI hash.
+- Part B: how =wolf-crypto-sys= should build against wolfSSL's validated FIPS
+  140-3 module (certificate #5548, wolfCrypt v5.2.3), the known ECC
+  pairwise-consistency-test blocker under =WOLFSSL_NO_MALLOC=, and which KDF is
+  approved for IronDB's use.
+
+** Primary sources
+
+| Id      | Source                                                                                                                                | Version / date                                                   |
+|---------+---------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------|
+| [WS]    | wolfSSL repository, github.com/wolfSSL/wolfssl, checked out at =/tmp/wolfssl=                                                         | master =d6051951=, 2026-10-20, =LIBWOLFSSL_VERSION_STRING "5.9.4"= |
+| [VEN]   | wolfCrypt sources vendored in =wolf-crypto-sys/wolfcrypt/=                                                                           | 5.7.2 (=wolfcrypt-update-checklist.org=, verified 2024-09-14)    |
+| [SP]    | wolfSSL Inc., /wolfCrypt FIPS 140-3 Non-Proprietary Security Policy/, CMVP certificate #5548, csrc.nist.gov =140sp5548.pdf=            | Document version 1.5, 9 September 2026; module v5.2.3            |
+| [MAN]   | wolfSSL Manual, chapter 5 "Portability", section "Custom Input/Output Abstraction Layer", wolfssl.com/documentation/manuals/wolfssl/chapter05.html | fetched 2026-10-20                                   |
+| [DOX]   | wolfSSL API reference sources, =doc/dox_comments/header_files/{ssl.h,wolfio.h,memory.h}= in [WS]                                      | as [WS]                                                          |
+| [CL]    | =ChangeLog.md= in [WS]                                                                                                                | as [WS]                                                          |
+| [PUF]   | tlspuffin, github.com/tlspuffin/tlspuffin (README), and M. Ammann, L. Hirschi, S. Kremer, "DY Fuzzing: Formal Dolev-Yao Models Meet Cryptographic Protocol Fuzz Testing", IEEE S&P 2024 (eprint 2023/57) | README fetched 2026-10-20 |
+| [MEAS]  | Measurements made for this document (Appendix A): a loopback handshake harness compiled from [WS], and a keygen experiment compiled from [VEN] | 2026-10-20, x86_64 Linux, gcc                               |
+
+File references below are =path:line= in [WS] unless marked [VEN]; policy
+references are section/page numbers of [SP].
+
+** The crate today (0.1.0-alpha.15)
+
+- =wolf-crypto-sys/build.rs= compiles every =wolfcrypt/src/*.c= (except
+  =evp.c=, =misc.c=) with =cc=, with =WOLFCRYPT_ONLY=, =WOLFSSL_NO_MALLOC=,
+  =USE_FAST_MATH=, =TFM_TIMING_RESISTANT=, =ECC_TIMING_RESISTANT=, =HAVE_ECC=
+  (P-256, P-384, =ECC_MIN_KEY_SZ=256=, =ECC_SHAMIR=), AES-GCM/CTR, SHA-2/3,
+  BLAKE2, RIPEMD, ChaCha20-Poly1305, HKDF, PBKDF2. =HAVE_FIPS= is commented
+  out. No TLS sources and no =wolfssl/*.h= (TLS) headers are vendored; the
+  vendored tree is =wolfcrypt/include/wolfssl/wolfcrypt/*.h= and
+  =wolfcrypt/src/wolfcrypt/src/*.c= only.
+- =wolf-crypto= is =no_std=, no-alloc by default, zeroizes on drop, gates
+  non-approved algorithms behind =allow-non-fips= and marks approved ones with
+  the sealed =Fips= trait (=AGENTS.md=, "Design principles").
+- =random::Rng= relies on =WC_RNG::drbg= pointing at the inline
+  =WC_RNG::drbg_data= under =WOLFSSL_NO_MALLOC= and re-anchors it before every
+  call (=wolf-crypto/src/random/mod.rs=, =Rng::anchor=); =ecc::Key= relies on
+  =ecc_key= being plain data with =heap == NULL=
+  (=wolf-crypto/src/ecc/key.rs=). Both assumptions are recorded in
+  =wolfcrypt-update-checklist.org= and both are touched by the memory-model
+  decision in this document (section [[*The static-memory decision][The static-memory decision]]).
+- =PrivateKey::generate= does not define =WOLFSSL_VALIDATE_ECC_KEYGEN= because
+  the pairwise consistency test allocates with =XMALLOC= and fails with
+  =MEMORY_E= under =WOLFSSL_NO_MALLOC= (checklist, "Key generation
+  self-tests"); it runs =wc_ecc_check_key= instead.
+
+* Part A: wolf-tls, a sans-I/O TLS 1.3 binding for the IronDB peer channel
+
+** Requirements and the wolfSSL facilities that satisfy them
+
+| Requirement                                            | wolfSSL facility                                                                                                                                      | Source                                                                        |
+|--------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------|
+| No sockets, no runtime; caller-owned buffers           | =CallbackIORecv= / =CallbackIOSend= registered with =wolfSSL_CTX_SetIORecv/SetIOSend=, per-object context via =wolfSSL_SetIOReadCtx/SetIOWriteCtx=; =WOLFSSL_USER_IO= removes the default socket I/O | =wolfssl/wolfio.h:820-833=; [MAN] "Custom Input/Output Abstraction Layer"; [DOX] =wolfio.h= |
+| Non-blocking progress                                  | callbacks return =WOLFSSL_CBIO_ERR_WANT_READ= / =_WANT_WRITE= (=-2=, =-3=); =wolfSSL_get_error= then reports =WOLFSSL_ERROR_WANT_READ= / =_WANT_WRITE=; pending output stays in wolfSSL's output buffer and is flushed on the next call | =wolfssl/error-ssl.h:277=; =src/internal.c:12943= (=SendBuffered=); [DOX] =wolfSSL_write= |
+| TLS 1.3 only                                           | =WOLFSSL_TLS13=, =WOLFSSL_NO_TLS12=, =NO_OLD_TLS=; methods =wolfTLSv1_3_{client,server}_method_ex(heap)=                                            | =wolfssl/wolfcrypt/settings.h:2040-2052= (=WOLFSSL_TINY_TLS13= profile shows the canonical trio); =wolfssl/ssl.h:1203-1210= |
+| One suite: =TLS_AES_256_GCM_SHA384=                    | build only AES-256-GCM + SHA-384 (=NO_AES_128=, =NO_AES_192=, no ChaCha) and set =wolfSSL_CTX_set_cipher_list(ctx, "TLS13-AES256-GCM-SHA384")=       | =src/internal.c:31995= (suite name table); [MEAS] negotiated name            |
+| One group: secp256r1                                   | =ECC_USER_CURVES= with only P-256 compiled; =wolfSSL_CTX_set_groups(ctx, {WOLFSSL_ECC_SECP256R1}, 1)=                                              | =src/tls.c:404=; =wolfssl/ssl.h:5114=                                         |
+| Mutual authentication                                  | =wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER \vert WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, cb)= on both sides; the TLS 1.3 server rejects a Finished without a peer certificate and =CertificateVerify= (=NO_PEER_CERT=) | =wolfssl/ssl.h:3401-3403=; =src/tls13.c:13705-13715= (=DoTls13Finished=, =havePeerVerify= check at 13710) |
+| RFC 7250 raw public keys                               | =HAVE_RPK=; =wolfSSL_CTX_set_{client,server}_cert_type(ctx, {WOLFSSL_CERT_TYPE_RPK}, 1)=; own credential loaded as DER =SubjectPublicKeyInfo= through =wolfSSL_CTX_use_certificate_buffer(..., WOLFSSL_FILETYPE_ASN1)= (detected as RPK by =asn.c=, =isRPK=) | =wolfssl/ssl.h:6543-6597=; =src/ssl_load.c:2355-2383=; =wolfcrypt/src/asn.c:23879= |
+| Pin by SPKI hash                                       | =wolfSSL_CTX_set_expected_rpk(ctx, spkiDer, len)= stores SHA-256 of the SPKI (=WOLFSSL_MAX_RPK_PINS= entries, default 4); an RPK peer that matches no pin fails closed with =RPK_UNTRUSTED_E= whenever verification is on | =wolfssl/ssl.h:6598-6625=; =src/internal.c:19721-19777= (=RpkIsTrusted= is defined at 18623); [CL] 5.9.2 "Behavioral change (Raw Public Key fail-closed)" |
+| Fallback: pinned self-signed ECDSA leaf                | X.509 path with a verify callback; =WOLFSSL_ALWAYS_VERIFY_CB= invokes the callback for the leaf even on success; =store->certs[0]= is the raw DER the peer sent; =wolfSSL_SetCertCbCtx= supplies the context | =src/internal.c:16731-16752=, =16890-16895=; =src/ssl_api_cert.c:817-834= |
+| No resumption, tickets, PSK, 0-RTT                     | do not define =HAVE_SESSION_TICKET=, =WOLFSSL_EARLY_DATA=, =WOLFSSL_POST_HANDSHAKE_AUTH=; define =NO_PSK=, =NO_SESSION_CACHE=; belt and braces: =wolfSSL_CTX_no_ticket_TLSv13=, =wolfSSL_CTX_no_dhe_psk= | =wolfssl/ssl.h:1535-1545=; =examples/configs/user_settings_tls13.h= |
+| No malloc                                              | =WOLFSSL_STATIC_MEMORY= + =WOLFSSL_NO_MALLOC=: all allocations come from caller-provided pools, there is no libc fallback                              | =wolfssl/wolfcrypt/types.h:890-905=; =wolfcrypt/src/memory.c:1052-1083=       |
+
+The last row is the central design decision and is discussed on its own in
+[[*The static-memory decision][The static-memory decision]].
+
+** Version requirement: the vendored wolfSSL must move to 5.9.4 or later
+
+The RPK facilities this design depends on do not exist in the vendored 5.7.2
+and the 5.x RPK code had authentication-bypass bugs until 5.9.4:
+
+- 5.9.2 (Jun 23, 2026): RPK fail-closed behaviour and the pinning API
+  =wolfSSL_CTX_set_expected_rpk= / =wolfSSL_set_expected_rpk= ([CL] 5.9.2,
+  "Behavioral change (Raw Public Key fail-closed)"); fix for an un-negotiated
+  raw public key accepted in place of an X.509 certificate, bypassing chain
+  validation ([CL] 5.9.2, "Un-negotiated Raw Public Key (RFC 7250) accepted",
+  PR 10702).
+- 5.9.4 (Sep 25, 2026): CVE-2026-89136, "the client side of a TLS 1.2, 1.3
+  and DTLS 1.2 connection could accept an unsolicited
+  =server_cert_type=RawPublicKey= which allowed a malicious or misbehaving
+  server to bypass authentication ... affects versions 5.6.0 to 5.9.2" ([CL]
+  5.9.4, PR 11009); "forbid sending more than one certificate with Raw Public
+  Keys" (PR 11174); "fixed the verification logic for Raw Public Keys" (PR
+  11458).
+
+The TLS layer and the wolfCrypt layer must come from the same release
+(=wolfssl/internal.h= is tied to the wolfCrypt headers), so =wolf-tls= forces
+an update of the vendored wolfCrypt from 5.7.2 to >= 5.9.4, which means
+working through =wolfcrypt-update-checklist.org= first. Two items of the
+checklist are directly affected and are discussed below: the =WC_RNG= inline
+DRBG (changes under static memory) and the ECC pairwise consistency test (no
+longer allocates in non-=WOLFSSL_SMALL_STACK= builds on master:
+=wolfcrypt/src/ecc.c:11358-11366= declares =byte sig[SIG_SZ + 32]= on the
+stack and =WC_ALLOC_VAR_EX= is a no-op, =wolfssl/wolfcrypt/types.h:1064=).
+
+** Sans-I/O design through the I/O callbacks
+
+*** Mechanism
+
+wolfSSL has no notion of a socket once =WOLFSSL_USER_IO= is defined
+([MAN]: "WOLFSSL_USER_IO can be defined to remove the automatic setting of
+the default I/O functions EmbedSend() and EmbedReceive()"). Every byte it
+wants to read or write goes through the two callbacks
+
+#+begin_src c
+typedef int (*CallbackIORecv)(WOLFSSL *ssl, char *buf, int sz, void *ctx);
+typedef int (*CallbackIOSend)(WOLFSSL *ssl, char *buf, int sz, void *ctx);
+#+end_src
+
+(=wolfssl/wolfio.h:820-821=). The contract, from [DOX] =wolfio.h= and
+=src/internal.c= (=SendBuffered=):
+
+- recv returns the number of bytes copied into =buf= (at most =sz=), or
+  =WOLFSSL_CBIO_ERR_WANT_READ= when nothing is available; the calling
+  =wolfSSL_connect/accept/read/write= then returns =-1= and
+  =wolfSSL_get_error= yields =WOLFSSL_ERROR_WANT_READ=.
+- send returns the number of bytes accepted (a short count is fine:
+  =SendBuffered= loops, =src/internal.c:12971-13038=, =WANT_WRITE= case at 12982), or
+  =WOLFSSL_CBIO_ERR_WANT_WRITE=; the unsent remainder stays in
+  =ssl->buffers.outputBuffer= and is flushed at the start of the next call
+  (=SendBuffered= is called before any new record is built).
+- =WOLFSSL_CBIO_ERR_CONN_CLOSE= / =_CONN_RST= / =_GENERAL= are fatal.
+
+*** The wolf-tls driving model
+
+Each public method of a connection takes the caller's buffers for the
+duration of that single call:
+
+#+begin_src rust
+pub struct Io<'a> { input: &'a [u8], consumed: usize, output: &'a mut [u8], produced: usize }
+#+end_src
+
+Immediately before every call into wolfSSL the method sets
+=wolfSSL_SetIOReadCtx(ssl, &mut io)= and =wolfSSL_SetIOWriteCtx(ssl, &mut io)=
+to the address of this stack-local =Io=, and the two =extern "C"= callbacks
+copy out of =io.input= / into =io.output= and return =WANT_READ= /
+=WANT_WRITE= when they run dry. No pointer to caller memory survives the
+call: the next call installs new context pointers before wolfSSL can use the
+old ones. This is the same "re-anchor before every FFI call" discipline that
+=random::Rng::anchor= already uses, applied to the I/O context instead of to
+a self-pointer.
+
+The caller's loop is therefore:
+
+1. =conn.handshake(&mut io)= -> =Status::{WantRead, WantWrite, Done}=; the
+   caller ships =io.output[..produced]= to the network and feeds the next
+   received bytes as =input=.
+2. after =Done= the connection is =Conn<Established>=;
+   =send(&mut io, plaintext) -> usize= and =recv(&mut io, plaintext_out) ->
+   usize= work the same way (a record may need several calls to drain).
+3. =close(&mut io)= sends =close_notify= (=wolfSSL_shutdown=, returning
+   =WOLFSSL_SHUTDOWN_NOT_DONE= until the peer's =close_notify= is read,
+   =wolfssl/ssl.h:3374-3378=) and yields =Conn<Closed>=.
+
+wolfSSL itself never blocks and never sleeps in this configuration; the only
+system interaction left in the TLS layer is the DRBG seed (section
+[[*Entropy][Entropy]]).
+
+*** Memory: per-connection static pools
+
+The TLS layer is not allocation-free: =wolfSSL_CTX_new_ex= and =wolfSSL_new=
+allocate the =WOLFSSL_CTX= (280 bytes) and =WOLFSSL= (1216 bytes) objects,
+the handshake allocates the =DecodedCert= (3688 bytes), the ECC keys, the
+handshake hashes and the record buffers ([MEAS], sizes under the profile of
+Appendix A). Under =WOLFSSL_NO_MALLOC= alone every one of these fails. wolfSSL's
+answer is =WOLFSSL_STATIC_MEMORY= ([DOX] =memory.h=, =wc_LoadStaticMemory=;
+=configure.ac:12136-12180=, =--enable-staticmemory=): the caller hands over a
+buffer which =wc_LoadStaticMemory= partitions into fixed buckets
+(=WOLFMEM_BUCKETS= / =WOLFMEM_DIST=, =wolfssl/wolfcrypt/memory.h:104-200=),
+=XMALLOC(size, heap, type)= becomes =wolfSSL_Malloc(size, heap, type)=
+(=wolfssl/wolfcrypt/types.h:890-905=), and with =WOLFSSL_NO_MALLOC= also
+defined there is no fallback to =malloc= when no heap hint is present
+(=wolfcrypt/src/memory.c:1052-1083=: "No heap hint found to use and no
+malloc").
+
+For TLS the pool is attached to the context:
+
+#+begin_src c
+wolfSSL_CTX_load_static_memory(&ctx, wolfTLSv1_3_server_method_ex, gen, genSz,
+                               WOLFMEM_GENERAL | WOLFMEM_TRACK_STATS, 1);
+wolfSSL_CTX_load_static_memory(&ctx, NULL, io, ioSz,
+                               WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1);
+#+end_src
+
+(=src/ssl.c:1486-1523=, [DOX] =ssl.h= =wolfSSL_CTX_load_static_memory=). The
+first call creates the =WOLFSSL_CTX= /inside/ the general pool; the second
+dedicates two fixed =WOLFMEM_IO_SZ= (16992-byte) blocks per connection to the
+record input and output buffers, so a 16 KiB record never triggers a bucket
+search. =WOLFMEM_TRACK_STATS= makes =wolfSSL_is_static_memory= /
+=wolfSSL_CTX_is_static_memory= report peak and current usage.
+
+Measured on the Appendix A profile ([MEAS], one mutual-RPK handshake plus one
+application record each way, =-Os=):
+
+| Quantity                                         | Client     | Server     |
+|--------------------------------------------------+------------+------------|
+| general-pool peak (bucket granularity)           | 27,424 B   | 27,616 B   |
+| general-pool peak live blocks                    | 21         | 24         |
+| allocations / frees over the connection          | 39 / 34    | 46 / 41    |
+| fixed IO blocks                                  | 2 x 16,992 | 2 x 16,992 |
+| handshake bytes on the wire (sent)               | 492        | 534        |
+
+A wrapped =malloc= that aborts proved that no libc allocation happens
+after =wolfSSL_Init()= with this profile ([MEAS], =-Wl,--wrap=malloc=).
+
+A per-connection budget of 64 KiB general pool (the measured 28 KiB peak
+plus bucket overhead and headroom for the X.509 fallback, whose
+=DecodedCert= is the same 3688 bytes but whose certificate is larger than a
+91-byte SPKI) and 2 x 17 KiB fixed IO blocks, i.e. about 100 KiB per peer
+connection, is the planning number. The exact bucket list should be
+re-measured on the final profile with =WOLFMEM_TRACK_STATS= as
+=examples/configs/user_settings_tinytls13.h= does for its own profile
+(comment "Static-memory pool buckets ... measured with").
+
+*** Entropy
+
+=wolfSSL_new= instantiates a Hash-DRBG for the connection
+(=ReinitSSL= -> =wc_InitRng_ex=). With =NO_FILESYSTEM= and no =getrandom=
+the default seed function has no source left and =wc_GenerateSeed= fails
+with =NOT_COMPILED_IN= (=-174=) ([MEAS]; =wolfcrypt/src/random.c:11856-12030=:
+the =/dev/urandom= path is under =#ifndef NO_FILESYSTEM=, the =getrandom=
+path under =HAVE_GETRANDOM=). =wolf-tls= must therefore choose explicitly:
+
+- =DECISION= (recommended): =WC_RNG_SEED_CB= and =wc_SetSeed_Cb=
+  (=wolfssl/wolfcrypt/random.h=, [VEN] line 244-245 and master) with a seed
+  callback supplied by the Rust side, so the crate stays independent of the
+  OS and the same mechanism satisfies the FIPS policy, which requires the
+  application to "register an entropy callback to load entropy into the
+  module from an external entropy source" ([SP] 11.1, p. 50).
+- On hosted Linux targets =HAVE_GETRANDOM= is an acceptable alternative
+  (used for the measurements).
+
+*** Threading
+
+A =Conn= is driven by one thread at a time (=&mut self=); its pools are its
+own. wolfSSL's remaining process-wide state in this profile is
+=wolfSSL_Init()= (reference counted; call once from a Rust =Once=) and the
+per-pool mutex (=WOLFSSL_HEAP::memory_mutex=, absent under
+=SINGLE_THREADED=, =wolfssl/wolfcrypt/memory.h:264-266= (=memory_mutex=, line 265)). With one pool per
+connection the pool mutex is redundant and =SINGLE_THREADED= is sound /only
+if no pool is ever shared between threads/; the FIPS path below wants a
+shared pool, so the recommendation is to keep wolfSSL's mutex compiled in
+(on =no_std= targets through =WOLFSSL_USER_MUTEX= implemented in Rust) and
+let =Conn= be =Send + !Sync=.
+
+** Build: vendoring the TLS layer next to wolfCrypt
+
+*** Files to add to =wolf-crypto-sys/wolfcrypt=
+
+From =gcc -MM= over the Appendix A profile ([MEAS]): the six compiled units
+=src/ssl.c=, =src/internal.c=, =src/tls.c=, =src/tls13.c=, =src/keys.c=,
+=src/wolfio.c=; the units they =#include= textually (not compiled on their
+own): =src/ssl_api_{cert,crl_ocsp,dtls,ext,hs,pk,rw}.c=,
+=src/ssl_{asn1,bn,certman,crypto,ech,err,load,misc,p7p12,sess,sk,tsp}.c=,
+=src/pk.c=, =src/pk_ec.c=, =src/pk_rsa.c=, =src/x509.c=, =src/x509_str.c=,
+=src/conf.c=, =wolfcrypt/src/evp.c=, =wolfcrypt/src/evp_pk.c=,
+=wolfcrypt/src/misc.c=; and the headers =wolfssl/ssl.h=, =wolfssl/internal.h=,
+=wolfssl/error-ssl.h=, =wolfssl/wolfio.h=, =wolfssl/callbacks.h=,
+=wolfssl/version.h=. (=src/include.am:17-42= lists the included units as
+=EXTRA_DIST=, confirming they are not separate compilation units.)
+
+The existing exclusion of =evp.c= and =misc.c= from compilation in
+=build.rs= stays correct; they are included, not compiled. The vendored
+=src/wolfcrypt/src/= directory currently contains build droppings (=a.out=,
+=testing.o=) and 40 MB of SP-math sources that this configuration does not
+compile; pruning them is independent of this plan.
+
+*** Features and defines
+
+=DECISION=: add a =tls= feature to =wolf-crypto-sys= (and a =wolf-tls= crate
+depending on =wolf-crypto= and =wolf-crypto-sys= with that feature). Because
+=WOLFSSL_STATIC_MEMORY= changes the memory model of /all/ of wolfCrypt
+(=XMALLOC= signature, =WC_RNG= layout), the feature is crate-wide, not a
+second library: with =tls= enabled the one static library is built with the
+defines below in addition to today's set, and =wolf-crypto= gains the
+corresponding =cfg= branches (section [[*The static-memory decision][The static-memory decision]]).
+
+| Define                                         | Purpose                                                                                      |
+|------------------------------------------------+----------------------------------------------------------------------------------------------|
+| drop =WOLFCRYPT_ONLY=                          | enables the TLS layer                                                                        |
+| =WOLFSSL_TLS13=, =WOLFSSL_NO_TLS12=, =NO_OLD_TLS=, =HAVE_TLS_EXTENSIONS=, =HAVE_SUPPORTED_CURVES=, =HAVE_HKDF= | TLS 1.3 only (=settings.h:2040-2052=)                                      |
+| =HAVE_RPK=, =WOLFSSL_MAX_RPK_PINS=<n>          | RFC 7250 and the pin table size (each pin costs 32 bytes in =WOLFSSL_CTX= and =WOLFSSL=, =ssl.h:6553-6560=) |
+| =WOLFSSL_USER_IO=, =WOLFSSL_NO_SOCK=, =NO_FILESYSTEM=, =NO_WRITEV=, =WOLFSSL_NO_GETPID= | no sockets, files or process state (the =user_settings_tinytls13.h= "provide your own send/recv callbacks" block) |
+| =WOLFSSL_STATIC_MEMORY= (keep =WOLFSSL_NO_MALLOC=) | pools, no libc fallback                                                                   |
+| =NO_PSK=, =NO_SESSION_CACHE=; no =HAVE_SESSION_TICKET=, =WOLFSSL_EARLY_DATA=, =WOLFSSL_POST_HANDSHAKE_AUTH=, =HAVE_SNI= | no resumption, tickets, 0-RTT, PHA                                  |
+| =NO_RSA=, =NO_DH=, =NO_DSA=, =NO_AES_128=, =NO_AES_192=, no ChaCha | nothing but the one suite and ECDSA P-256 can be negotiated                        |
+| =WOLFSSL_ASN_TEMPLATE=, =NO_ASN_TIME=          | template ASN.1 parser; no =time()= dependency (pinned credentials make validity dates moot; revisit if the X.509 fallback is to honour dates) |
+| =WOLFSSL_ALWAYS_VERIFY_CB=                     | the verify callback runs for the leaf on success too (=src/internal.c:16890-16895=), needed to record the peer identity |
+| =WC_RNG_SEED_CB= (or =HAVE_GETRANDOM= on hosted Linux) | entropy, see above                                                                    |
+| =NO_ERROR_STRINGS=                             | optional, saves flash; error codes are mapped in Rust anyway                                |
+
+=WOLFSSL_CHAIN_VERIFY_CB= (master, not yet in a release) replaces
+wolfSSL's whole verification with a callback but "Not supported with the
+callback: DTLS, raw public keys (RFC 7250)" (=wolfssl/ssl.h:1816-1817=), so
+it is not an option for the RPK path; it could serve the X.509 fallback
+later.
+
+*** Size of the compiled TLS layer
+
+Compiled from [WS] with the Appendix A profile on x86_64, =size= of the
+objects ([MEAS]):
+
+| Object (TLS layer)   | text, =-Os= | text, =-O2= |
+|----------------------+-------------+-------------|
+| =ssl.o=              | 23,978      | 36,281      |
+| =internal.o=         | 29,450      | 43,813      |
+| =tls.o=              | 18,741      | 29,178      |
+| =tls13.o=            | 22,461      | 34,377      |
+| =keys.o=             | 2,120       | 3,147       |
+| =wolfio.o=           | 472         | 500         |
+| total TLS layer      | 97,222 (95 KiB) | 147,296 (144 KiB) |
+
+=asn.o= under this profile is 40,704 bytes (=-Os=) against 44,330 bytes
+under the crate's current =WOLFCRYPT_ONLY= flag set, so the certificate code
+the TLS layer needs adds nothing to =asn.c= beyond what the crate already
+builds. The whole loopback harness (TLS layer + the wolfCrypt subset it
+needs + the harness) links to 201,058 bytes of text with =-Os=,
+=-ffunction-sections -Wl,--gc-sections= and =NO_ERROR_STRINGS=; the TLS
+layer's share after garbage collection is therefore below 95 KiB. Expect
+roughly 90-100 KiB (=-Os=) to 150 KiB (=-O2=) of additional code for the
+TLS layer on x86_64; ARM Thumb-2 is typically 20-30% smaller.
+
+** The safe Rust API
+
+*** Shape
+
+#+begin_src rust
+// wolf-tls
+pub struct Spki(pub [u8; 91]);                   // DER SubjectPublicKeyInfo, P-256, uncompressed
+pub struct SpkiHash(pub [u8; 32]);               // SHA-256 of the DER SPKI (what wolfSSL stores)
+
+pub struct Identity { key: wolf_crypto::ecc::PrivateKey<P256>, spki: Spki }   // our credential
+pub struct Pins<const N: usize> { spki: [Spki; N] }                           // peers we accept
+
+pub struct Pool<const GENERAL: usize, const IO: usize> { /* [u8; GENERAL], [u8; IO] in a Zeroizing wrapper */ }
+
+pub struct Config<'id, R: Role> { identity: &'id Identity, pins: &'id [Spki], _role: PhantomData<R> }
+pub struct Client; pub struct Server;            // sealed Role
+
+pub struct Conn<'p, S: State> { ssl: NonNull<WOLFSSL>, ctx: NonNull<WOLFSSL_CTX>, pool: &'p mut PoolDyn, peer: Option<SpkiHash>, _s: PhantomData<S> }
+pub struct Handshaking; pub struct Established; pub struct Closed;   // sealed State
+
+pub struct Io<'a> { pub input: &'a [u8], pub consumed: usize, pub output: &'a mut [u8], pub produced: usize }
+pub enum Status { WantRead, WantWrite, Done }
+
+impl<'p> Conn<'p, Handshaking> {
+    pub fn new<R: Role>(cfg: &Config<'_, R>, pool: &'p mut PoolDyn, seed: &mut dyn Entropy) -> Result<Self, Error>;
+    pub fn handshake(&mut self, io: &mut Io<'_>) -> Result<Status, Error>;
+    pub fn established(self) -> Result<Conn<'p, Established>, Self>;   // only after Status::Done
+}
+impl<'p> Conn<'p, Established> {
+    pub fn peer(&self) -> &PeerIdentity;                                 // always present: the handshake proved it
+    pub fn send(&mut self, io: &mut Io<'_>, plaintext: &[u8]) -> Result<usize, Error>;
+    pub fn recv(&mut self, io: &mut Io<'_>, plaintext: &mut [u8]) -> Result<usize, Error>;  // Ok(0) == close_notify received
+    pub fn close(self, io: &mut Io<'_>) -> Result<Conn<'p, Closed>, Error>;
+}
+impl<S: State> Drop for Conn<'_, S> { /* wolfSSL_free, wolfSSL_CTX_free, then zeroize the whole pool */ }
+#+end_src
+
+Notes on the typestate:
+
+- =Conn<Handshaking>= has no =send= / =recv=; =Conn<Closed>= has nothing
+  but =Drop=. Misuse does not compile.
+- =established()= is the only way to obtain =Conn<Established>= and it checks
+  =wolfSSL_is_init_finished= (=wolfssl/ssl.h:3246=; returning =Err(self)= otherwise), so a
+  connection cannot be promoted by the caller's bookkeeping alone.
+- The =WOLFSSL= and =WOLFSSL_CTX= live inside the borrowed pool, so the
+  =Conn= value itself is freely movable (it holds raw pointers into memory it
+  does not own and that cannot move while the borrow lasts). The pool borrow
+  is exclusive for the life of the connection; the pool is reusable after
+  the =Conn= is dropped and zeroized.
+- One =WOLFSSL_CTX= per connection (not shared): a context carries the
+  credential, pins and pool, all per peer in IronDB's model; sharing would
+  need the pool mutex and brings nothing.
+- =Error= is a small enum (section [[*Error mapping][Error mapping]]), never a wolfSSL integer.
+
+*** Peer identity
+
+Two mechanisms, used together:
+
+1. /Authorization/ is wolfSSL's: the handshake can only complete if the peer's
+   RPK matches one of the pins (=RpkIsTrusted=, =src/internal.c:18623=, applied at 19733-19777).
+2. /Identification/ is the crate's: the verify callback (always invoked for
+   the leaf thanks to =WOLFSSL_ALWAYS_VERIFY_CB=) receives
+   =store->certs[0]= which, for an RPK peer, is the DER SPKI exactly as
+   received (=src/internal.c:16751-16752=; the same bytes
+   =wolfSSL_CTX_set_expected_rpk= hashes). The callback, with the =Conn= as
+   =userCtx= via =wolfSSL_SetCertCbCtx=, hashes it with
+   =wolf_crypto::hash::Sha256=, checks it against the pin set again (defence
+   in depth; an RPK peer that is not pinned is rejected by returning 0 even if
+   wolfSSL's own check were ever bypassed), and stores the =SpkiHash= in
+   =Conn::peer=. =Conn<Established>::peer()= returns a =PeerIdentity { hash:
+   SpkiHash, spki: Spki, key: PublicKey<P256> }= where =key= is produced
+   through =PublicKey::<P256>::from_spki_der=, i.e. with full public-key
+   validation by =wolf-crypto=.
+
+If the X.509 fallback is enabled the same callback compares the whole DER
+leaf in =store->certs[0]= with the pinned leaves and ignores =preverify=
+(which will report =ASN_NO_SIGNER_E= for a self-signed leaf with no CA
+loaded); the peer identity is then the SHA-256 of the SPKI extracted from the
+pinned leaf. The fallback is a configuration-time choice (=Pins= of
+certificates instead of SPKIs), not a runtime negotiation: a peer that
+offers X.509 when RPK is configured is refused by wolfSSL because the
+offered certificate type is not in the negotiated list (5.9.2/5.9.4 fixes
+above).
+
+*** Error mapping
+
+=wolfSSL_get_error(ssl, ret)= returns =WOLFSSL_ERROR_WANT_READ= (2),
+=WOLFSSL_ERROR_WANT_WRITE= (3), =WOLFSSL_ERROR_ZERO_RETURN= (6), or the
+negative library code (=wolfssl/ssl.h:3427-3439=, =wolfssl/error-ssl.h=).
+The crate maps:
+
+| wolfSSL code(s)                                                                 | =wolf_tls::Error= / result     | Note                                              |
+|---------------------------------------------------------------------------------+--------------------------------+---------------------------------------------------|
+| =WOLFSSL_ERROR_WANT_READ= / =_WANT_WRITE=                                       | =Ok(Status::WantRead/WantWrite)= | not errors                                      |
+| =WOLFSSL_ERROR_ZERO_RETURN=                                                     | =recv -> Ok(0)=                | peer sent =close_notify=                          |
+| =RPK_UNTRUSTED_E= (-521), =NO_PEER_CERT= (-345), =VERIFY_CERT_ERROR= (-329), =PEER_KEY_ERROR= (-342), =UNSUPPORTED_CERTIFICATE= (-506), =VERIFY_FINISHED_ERROR= (-304) | =Error::PeerNotAuthenticated= | one variant: do not tell the network which check failed |
+| =MATCH_SUITE_ERROR= (-501), =VERSION_ERROR= (-326), =BAD_KEY_SHARE_DATA= (-421), =EXT_NOT_ALLOWED= (-424), =INVALID_PARAMETER= (-425) | =Error::ProfileMismatch=     | peer offered something outside the profile        |
+| =OUT_OF_ORDER_E= (-373), =DUPLICATE_MSG_E= (-395), =SANITY_MSG_E= (-394), =SANITY_CIPHER_E= (-375), =UNKNOWN_RECORD_TYPE= (-311), =LENGTH_ERROR= (-341), =BUFFER_ERROR= (-328), =DECRYPT_ERROR= (-312), =ALERT_COUNT_E= (-427) | =Error::Protocol=          | malformed or hostile peer                         |
+| =FATAL_ERROR= (-313)                                                            | =Error::PeerAlert(AlertCode)=  | from =wolfSSL_get_alert_history= (=wolfssl/ssl.h:3217=)                  |
+| =MEMORY_ERROR= (-303), =MEMORY_E= (-125)                                        | =Error::PoolExhausted=         | pool too small; never a silent fallback           |
+| =SOCKET_ERROR_E= (-308), callback =CONN_CLOSE/RST/GENERAL=                      | =Error::Transport=             | only produced by our own callbacks                |
+| anything else                                                                   | =Error::Internal=              | with the raw code available through =Debug= only  |
+
+The detailed code is retained in the =Error= value for logs but the
+=Display= of the authentication variants is deliberately opaque, matching
+=wolf_crypto::Unspecified='s rationale.
+
+*** Zeroization
+
+- wolfSSL zeroizes its own key material on =wolfSSL_free= (=FreeSSL= ->
+  =FreeArrays= / =ForceZero= of secrets; the input buffer is =ForceZero='d
+  when encryption was on, =src/ssl.c:5993=).
+- The crate does not rely on that alone: =Pool= is =Zeroizing=-wrapped and
+  =Conn::drop= zeroizes the entire general and IO pools after
+  =wolfSSL_free= / =wolfSSL_CTX_free=. Everything the connection ever
+  allocated, including anything wolfSSL forgot, is thereby erased; this is a
+  property only the per-connection-pool design can give.
+- =Identity= holds a =wolf_crypto::ecc::PrivateKey= (zeroized on drop) and
+  exports it into wolfSSL as DER only for the =wolfSSL_CTX_use_PrivateKey_buffer=
+  call, from a =Zeroizing<[u8; 121]>= stack buffer; wolfSSL keeps its own
+  copy inside the pool (zeroized with the pool).
+- Plaintext handed to =send= is copied by wolfSSL into the output buffer
+  (pool) and encrypted in place; =recv= decrypts in the fixed input buffer
+  (pool) and copies out. Both are inside the zeroized pool.
+
+** Conformance tests
+
+All tests live in =wolf-tls/tests/= and run with =--no-default-features= as
+well, per =AGENTS.md=.
+
+*** Positive
+
+- loopback mutual-RPK handshake client/server through two =Io= queues
+  (the Appendix A harness, ported), asserting negotiated suite
+  =TLS_AES_256_GCM_SHA384=, group =secp256r1=, both =wolfSSL_get_negotiated_*_cert_type= == RPK, and =peer()= equal to the configured pin;
+- fragmentation: the same handshake with 1-byte input chunks and with
+  1-byte output buffers (exercises =WANT_READ= / =WANT_WRITE= on every
+  record boundary and =SendBuffered='s partial-send loop);
+- application data of 0, 1, 16384 and 16385 bytes (record boundary), and
+  =close_notify= in both orders;
+- interoperability: a =std=-only test that bridges =Io= to a TCP socket and
+  talks to =rustls= (server and client with RPK is not available in rustls;
+  use OpenSSL 3.2+ =SSL_CTX_set1_server_cert_type= / client-side RPK for
+  the RPK profile and rustls for the X.509-fallback profile);
+- pool accounting: peak usage stays under the documented budget; a pool one
+  bucket too small fails with =Error::PoolExhausted= and nothing else
+  (=-Wl,--wrap=malloc= style check in Rust: a global allocator that panics
+  outside the test's own setup).
+
+*** Negative: the authentication class
+
+Each case uses a /malicious peer/ written in Rust in the test crate on top
+of =wolf-crypto= (ECDH P-256, HKDF, AES-GCM, SHA-384, ECDSA): a minimal TLS
+1.3 record and handshake encoder that can omit, reorder or forge messages.
+It is not a second TLS stack, it only produces transcripts. The crate under
+test must reject every case with =Error::PeerNotAuthenticated= or
+=Error::Protocol= and must not reach =Established=:
+
+| Case                                                                 | Origin                                                                         |
+|----------------------------------------------------------------------+--------------------------------------------------------------------------------|
+| client sends Certificate but no =CertificateVerify=, then Finished  | CVE-2022-25640, [CL] 5.2.0 ("a client can simply omit the certificate_verify message"); checked by =DoTls13Finished= =havePeerVerify= and =SanityCheckTls13MsgReceived= |
+| client sends neither Certificate nor =CertificateVerify=             | =NO_PEER_CERT= path                                                            |
+| =CertificateVerify= signed with a different key than the Certificate's | CVE-2022-25638, [CL] 5.2.0                                                   |
+| =CertificateVerify= with a signature algorithm not matching the key  | [CL] 5.2.0 second item; 5.9.4 "TLS 1.3 CertificateVerify signature algorithm test" (PR 10777) |
+| server presents an RPK although the client did not offer =server_certificate_type= | CVE-2026-89136, [CL] 5.9.4                                         |
+| peer presents an X.509 certificate when RPK was negotiated, and vice versa | [CL] 5.9.2 "Un-negotiated Raw Public Key ... UNSUPPORTED_CERTIFICATE"     |
+| peer presents an RPK that is valid but not pinned                    | =RPK_UNTRUSTED_E= ([MEAS] cases 2 and 4)                                       |
+| RPK Certificate message carrying two entries                         | [CL] 5.9.4 PR 11174                                                            |
+| Finished with wrong verify_data                                      | =VERIFY_FINISHED_ERROR=                                                        |
+| ClientHello offering TLS 1.2 only / other suites / other groups / PSK modes / early data | profile mismatch; also asserts that no HelloRetryRequest is produced for a non-P-256 key share when P-256 is also offered |
+| NewSessionTicket sent by a peer server                               | must be ignored or rejected, never stored (no =HAVE_SESSION_TICKET=)           |
+| duplicate / out-of-order handshake messages, records of length 0 and 2^14+256+1, unknown content types | =SanityCheckTls13MsgReceived=, record layer checks                   |
+
+*** Fuzzing
+
+- =cargo-fuzz= targets in =wolf-tls/fuzz/=: (1) raw bytes into
+  =Conn<Handshaking>::handshake= as a server and as a client (with the
+  malicious-peer encoder as a structure-aware generator for the second
+  target), (2) the =Io= adapter with arbitrary chunking against a known-good
+  transcript (must always reach =Done=), (3) =recv= after the handshake with
+  arbitrary records.
+- tlspuffin-style: tlspuffin is a Dolev-Yao model-guided protocol fuzzer
+  with harnesses for OpenSSL, BoringSSL, LibreSSL and wolfSSL; it found
+  CVE-2022-38152/38153/39173/42905 and CVE-2023-6936 in wolfSSL and
+  reproduces CVE-2022-25638/25640 ([PUF] README table; [CL] 5.6.6 credits
+  "the tlspuffin fuzzer team ... Lucca Hirschi (Inria, LORIA), Steve Kremer
+  (Inria, LORIA), and Max Ammann (Trail of Bits)"; [CL] 5.9.4 PR 10755,
+  10984 credit the puffin team again). Its wolfSSL PUT drives the C
+  library through memory BIOs, exactly the interface =wolf-tls= uses, so the
+  plan is to build tlspuffin's wolfSSL PUT against /our/ vendored sources
+  and =user_settings= profile (not against a stock wolfSSL) and run its TLS
+  1.3 client-authentication and session-resumption attack models in CI
+  nightly. The README lists wolfSSL 5.1.0-5.4.0 as the tested range, so the
+  PUT bindings will need updating for 5.9.4; that is an open task, not a
+  blocker.
+
+** Part A open questions
+
+1. Should the pin table hold one key per connection (identity by
+   construction) or all peers (identity by callback)? The API above supports
+   both; IronDB's membership model decides =WOLFSSL_MAX_RPK_PINS=.
+2. =NO_ASN_TIME= for the X.509 fallback: accept pinned leaves regardless of
+   validity dates (current proposal) or supply a time source.
+3. Whether to expose =wolfSSL_CTX_set_group_messages= (one flight per
+   =WantWrite=) for the peer channel's framing; it reduces the number of
+   =WantWrite= round trips during the handshake.
+
+* Part B: the FIPS build path
+
+** What certificate #5548 validates
+
+From [SP]:
+
+- Module: wolfCrypt v5.2.3, software, FIPS 140-3 overall Level 1 (1.1-1.2,
+  p. 5; 2.1, p. 6). Delivered as =wolfssl-x.x.x-commercial-fipsv5.2.3.7z=,
+  "FIPS 140-3 module and SSL/TLS library", integrity test HMAC-SHA256
+  (Table 4, p. 9): the validated module files are shipped inside a wolfSSL
+  release; wolfSSL (TLS) is outside the boundary.
+- Boundary (Table 3, pp. 7-9): =wolfcrypt_first.c=, =aes.c= (+asm), =cmac.c=,
+  =dh.c=, =ecc.c=, =hmac.c=, =kdf.c= ("KDFs (software) (TLSv1.2, 1.3, SSH,
+  SRTP)"), =random.c=, =rsa.c=, =sha.c=, =sha256.c=, =sha3.c=, =sha512.c=,
+  =sp_*.c= (public-key math), =fips_test.c=, =fips.c= ("Pre-operational entry
+  point and Approved Services API wrappers"), =wolfcrypt_last.c=. Everything
+  else (=asn.c=, =memory.c=, =coding.c=, the TLS layer, ChaCha, BLAKE2 ...)
+  is outside.
+- Integrity: HMAC-SHA2-256 over the module, run at power-on/load and on
+  demand through =wolfCrypt_IntegrityTest_fips()=; the status is read with
+  =wolfCrypt_GetStatus_fips()= (5.1-5.2, p. 31; 10.5, p. 48). The hash
+  covers =.text= in =[wolfCrypt_FIPS_first, wolfCrypt_FIPS_last)= and
+  =.rodata= in =[wolfCrypt_FIPS_ro_start, wolfCrypt_FIPS_ro_end)= with the
+  =verifyCore[]= bytes skipped (=fips-hash-offline.sh:28-36=).
+- Modes and status indicators (2.4, pp. 13-15; Table 25, pp. 46-47):
+  =FIPS_MODE_INIT= (0), =FIPS_MODE_NORMAL= (1), =FIPS_MODE_DEGRADED= (2),
+  =FIPS_MODE_FAILED= (3, integrity failure, recovery by power cycle). Per
+  algorithm CAST states =FIPS_CAST_STATE_{INIT,PROCESSING,SUCCESS,FAILURE}=
+  via =wc_GetCastStatus_fips(type)=; CASTs run automatically on first use or
+  on demand with =wc_RunCast_fips(type)= / =wc_RunAllCast_fips()=. The
+  identifiers match =wolfssl/wolfcrypt/fips_test.h= in [WS]
+  (=FipsCastId=, =FipsCastStateId=, =FipsModeId=).
+- Conditional tests (Table 21, pp. 40-44): KATs for AES-CBC/GCM, HMAC
+  SHA-1/2-256/2-512/3-256, RSA, ECDSA P-256, KAS-ECC/FFC, TLS 1.2/1.3 KDF,
+  SSH KDF, Hash DRBG; pairwise consistency tests RSA, ECC (error
+  =ECC_PCT_E=, -286) and DH, "invoked automatically during generate key pair
+  service".
+- Approved algorithms (Table 7, pp. 15-18): AES (CBC/ECB/OFB/CTR/CCM/GCM/
+  GMAC/CMAC), ECDSA KeyGen/KeyVer/SigGen/SigVer P-224..P-521 with SHA-2/3,
+  Hash DRBG SHA2-256, HMAC SHA-1/2/3, KAS-ECC-SSC and KAS-FFC-SSC (SP
+  800-56A rev. 3, ephemeral unified), KDF SSH (CVL), KDF TLS v1.2 (CVL),
+  TLS v1.2 KDF RFC 7627 (CVL), TLS v1.3 KDF (CVL, "HMAC Algorithm -
+  SHA2-256, SHA2-384; KDF Running Modes - DHE, PSK, PSK-DHE"), RSA, SHA-1/2/3,
+  plus vendor-affirmed CKG. /Not/ listed: HKDF (RFC 5869 / SP 800-56C), KBKDF
+  (SP 800-108), PBKDF2 (SP 800-132), ChaCha20-Poly1305.
+- Operating rules the calling application must follow (2.7, pp. 23-25;
+  11.1, pp. 49-50): include =wolfssl/options.h= or (user-settings builds)
+  =wolfssl/wolfcrypt/settings.h= first with =WOLFSSL_USER_SETTINGS= set
+  globally and "no other wolfSSL specific build options should be set
+  globally"; register a FIPS callback with =wolfCrypt_SetCb_fips=; register
+  an entropy callback (=wc_SetSeed_Cb(wc_GenerateSeed)= or your own) before
+  operational use, which is the DRBG's first use and runs its CAST; unlock
+  private-key access with =wolfCrypt_SetPrivateKeyReadEnable_fips(1,
+  WC_KEYTYPE_ALL)= around private-key work and lock it again; GCM with
+  internal IV >= 96 bits; ECDSA digest length >= =WC_MIN_DIGEST_SIZE=; ECC
+  public keys <= P-521 ...
+- Configuration rule (6.2, pp. 31-32): "Any setting that affects the module
+  directly while compiling the executable binary shall not be used" unless
+  the User Guide [UG] lists it as allowed; the UG "will contain an exact
+  list of allowed settings". The UG ships with the bundle and is not
+  public.
+
+** Today's vendored build versus a validated build
+
+| Aspect                   | Today (=wolf-crypto-sys=, non-FIPS)                                 | Validated FIPS build                                                                                                   |
+|--------------------------+---------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------|
+| Sources                  | public wolfSSL 5.7.2 wolfCrypt, compiled by =cc= from =build.rs=    | commercial bundle: fixed v5.2.3 boundary files + a wolfSSL release around them; compiled /as the UG says/               |
+| Self-tests               | none                                                                 | in-core HMAC-SHA256 integrity at load (constructor =fipsEntry=), CASTs on first use, PCTs on key generation             |
+| API names                | =wc_*=                                                               | =wc_*_fips= wrappers from =fips.c= (policy 2.7 names =wc_ecc_sign_hash_fips()=, =wc_ecc_import_x963_ex_fips()= ...), reached through =wolfssl/wolfcrypt/fips.h= which the public headers include under =HAVE_FIPS= (=wolfssl/wolfcrypt/ecc.h:34-36=) |
+| Memory                   | =WOLFSSL_NO_MALLOC=, nothing allocates                               | the ECC PCT allocates (section below); =WOLFSSL_NO_MALLOC= itself must be on the UG's allowed list                     |
+| Key generation           | =WOLFSSL_VALIDATE_ECC_KEYGEN= off, =wc_ecc_check_key= afterwards     | FIPS v5+ forces the PCT (=ecc.c= [VEN] 6039-6050: =FIPS_VERSION_GE(5,0) \vert\vert WOLFSSL_VALIDATE_ECC_KEYGEN=)         |
+| Entropy                  | =/dev/urandom= inside =wc_GenerateSeed=                              | application-registered seed callback (policy 11.1)                                                                      |
+| Linking                  | one static =libwolfcrypt.a= from =cc=, Rust decides object order     | the integrity hash spans a contiguous address range bracketed by =wolfcrypt_first= / =wolfcrypt_last=; object order and the final image matter |
+
+The last row is why the FIPS path cannot simply be "=build.rs= with
+=HAVE_FIPS= uncommented": the hash is computed over the final linked image
+between two marker functions. For a statically linked Rust binary the
+expected hash would have to be computed after Cargo's final link
+(=fips-hash-offline.sh= does exactly this on an ELF: "single fixed-address
+(ET_EXEC) image, not stripped", patching =verifyCore[]= in place,
+=fips-hash-offline.sh:28-55=), or the run-time-reported hash copied into
+=fips_test.c= and the module rebuilt (=fips-hash.sh=; policy Figure 2's
+=IN_CORE_FIPS_E= callback, p. 50). Every change to the Rust binary that
+moves the module's text or rodata invalidates the hash.
+
+** Proposed =fips= build path for wolf-crypto-sys
+
+=DECISION= (recommended):
+
+1. The module is built by wolfSSL's own procedure, not by =cc=. A =fips=
+   feature of =wolf-crypto-sys= disables the vendored compilation and instead
+   reads =WOLF_CRYPTO_FIPS_DIR= (install prefix of a bundle built per the
+   UG: =./configure --enable-fips=v5 ...= with the UG's flag set, or the
+   =user_settings.h= method of policy 11.1) and links =libwolfssl=
+   (shared, see 3). The build script fails if the directory, =wolfssl/options.h=
+   (or the user-settings header) or =fips_test.h= is missing, and refuses to
+   proceed if =HAVE_FIPS= / =HAVE_FIPS_VERSION= in =options.h= do not say
+   v5.2.3 - the crate must never silently bind a non-validated library under
+   the =fips= feature.
+2. bindgen runs against the bundle's headers with =options.h= first (policy
+   11.1), so the =_fips= wrapper symbols are what the bindings call. The
+   Rust side does not hard-code symbol names: =wolf-crypto= calls
+   =wolf_crypto_sys::wc_ecc_make_key_ex= and the =fips= feature maps that to
+   the wrapper (a =cfg(feature = "fips")= re-export layer in the sys crate,
+   generated from the bundle's =fips.h=; its exact spelling is open question
+   B-1).
+3. Link the module dynamically by default under =fips=. A shared
+   =libwolfssl.so= built and hashed by the UG procedure carries its own,
+   stable in-core hash and is the deployment unit the policy describes
+   ("Updates to the Module are provided as a complete replacement", 2.1,
+   p. 7). Static linking is offered as =fips-static=, documented as
+   requiring the =fips-hash-offline.sh= post-link step on the final IronDB
+   executable, and is not the default because Cargo has no post-link hook.
+4. Runtime API in =wolf-crypto= (=cfg(feature = "fips")=, module =fips=):
+   #+begin_src rust
+   pub enum Mode { Init, Normal, Degraded, Failed }                 // FipsModeId
+   pub enum CastState { Init, Processing, Success, Failure }        // FipsCastStateId
+   pub enum Cast { AesCbc, AesGcm, HmacSha1, HmacSha2_256, HmacSha2_512, HmacSha3_256, Drbg, RsaSignPkcs1v15, EccCdh, EccPrimitiveZ, DhPrimitiveZ, Ecdsa, KdfTls12, KdfTls13, KdfSsh }
+   pub fn mode() -> Mode;                                           // wolfCrypt_GetMode_fips / GetStatus_fips
+   pub fn integrity_test() -> Mode;                                 // wolfCrypt_IntegrityTest_fips then GetStatus (policy 10.5: the test "always returns zero")
+   pub fn run_cast(c: Cast) -> Result<(), CastFailed>;              // wc_RunCast_fips
+   pub fn run_all_casts() -> Result<(), CastFailed>;                // wc_RunAllCast_fips
+   pub fn cast_status(c: Cast) -> CastState;                        // wc_GetCastStatus_fips
+   pub fn core_hash() -> &'static str;                              // wolfCrypt_GetCoreHash_fips
+   pub struct Module(());                                           // token: only obtainable through `init`
+   pub fn init(entropy: fn(&mut [u8]) -> Result<(), Unspecified>, on_failure: fn(Failure)) -> Result<Module, Mode>;
+   #+end_src
+   =init= registers the FIPS callback (=wolfCrypt_SetCb_fips=), the entropy
+   callback (=wc_SetSeed_Cb=), checks =mode() == Normal= and runs all CASTs
+   eagerly (the policy allows the CO to "invoke any CAST ahead of algorithm
+   use", 10.2, p. 44) so that no first-use CAST can fail inside a latency
+   sensitive path. The =Module= token is required by the constructors of
+   private-key operations, which wrap them in
+   =wolfCrypt_SetPrivateKeyReadEnable_fips(1/0, WC_KEYTYPE_ALL)= (policy
+   11.1); =types.h:2632-2636= in [WS] shows the same =WC_SPKRE_F= pattern the
+   TLS layer uses (=src/ssl.c:2517=, =3819=).
+   The crate's existing compile-time =Fips= marker stays the primary
+   gate; the runtime API adds the module status that only exists at runtime.
+5. =fips= implies =not(allow-non-fips)= at the Cargo level (a
+   =compile_error!= when both are set): nothing outside Table 7 is reachable
+   from a FIPS build, which also removes the question of whether non-boundary
+   algorithms compiled into the bundle's wolfSSL may be called.
+
+** The ECC pairwise-consistency-test blocker
+
+*** Analysis
+
+Under FIPS v5+ (or =WOLFSSL_VALIDATE_ECC_KEYGEN=), =wc_ecc_make_key_ex=
+ends with =_ecc_pairwise_consistency_test(key, rng)= (=ecc.c= [VEN]
+6039-6050; master 6408-6419), which signs and verifies a random digest. In
+the vendored 5.7.2 the signature buffer is allocated with
+=XMALLOC(sigLen + digestLen, NULL, DYNAMIC_TYPE_ECC)= - note the =NULL= heap
+([VEN] =ecc.c:10229=) - so under =WOLFSSL_NO_MALLOC= it returns
+=MEMORY_E= and key generation fails. On master the buffer is on the stack
+unless =WOLFSSL_SMALL_STACK= is defined, and when it is allocated the heap is
+=key->heap= (=ecc.c:11358-11366=). Which of the two the validated v5.2.3
+=ecc.c= contains is not visible from outside the bundle (open question B-2).
+The =fips.c= wrappers also allocate nothing of their own that we know of,
+but the same uncertainty applies.
+
+=memory.c= and =types.h= are /outside/ the boundary (Table 3), so the memory
+plumbing can be changed without touching validated code; the =XMALLOC=
+macro, however, is expanded /inside/ the boundary files, so the memory
+option chosen must be one the UG allows for the module build (policy 6.2).
+
+*** Options
+
+| Option                                                                                 | Mechanism                                                                                                                                                     | Works with a PCT that passes =NULL= heap (5.7.2 style)? | Works with =key->heap= (master style)? | Cost to the crate |
+|----------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------+----------------------------------------+-------------------|
+| 1. =WOLFSSL_STATIC_MEMORY= + =WOLFSSL_NO_MALLOC=, a static pool registered as the global heap hint (=wolfSSL_SetGlobalHeapHint=, present in [VEN] =memory.c:975= and master =memory.c:1018=) and/or passed per object (=wc_ecc_init_ex(key, heap, devId)=, =wc_InitRng_ex=) | =XMALLOC(s, NULL, t)= -> =wolfSSL_Malloc(s, NULL, t)= -> global hint's pool (=memory.c:1052-1091=) | yes, verified ([MEAS] case B)           | yes (key->heap or global hint)         | =WC_RNG= loses =drbg_data= (DRBG goes into the pool, =random.h:684-686=), every allocating object needs a heap hint, =Rng::anchor= disappears |
+| 2. keep today's memory model and register a Rust allocator through =wolfSSL_SetAllocators= (=memory.c:112=); under =WOLFSSL_NO_MALLOC= =wolfSSL_Malloc= still honours a registered =malloc_function= ([VEN] =memory.c:346-368=) | =XMALLOC(s, h, t)= -> =wolfSSL_Malloc(s)= -> Rust fixed arena (a few hundred bytes for the PCT: 2*32+80+32 bytes) | yes (heap argument is ignored)          | yes                                    | smallest: one global allocator callback; no layout changes; but the callback has no context, so one process-wide arena with a lock |
+| 3. ask wolfSSL for a validated =ecc.c= whose PCT does not allocate                     | a code change inside the boundary                                                                                                                             | n/a                                                     | n/a                                    | a new validation or a vendor-affirmed update; not under our control |
+| 4. define =WOLFSSL_SMALL_STACK=? (no)                                                  | makes /more/ things allocate                                                                                                                                  | worse                                                   | worse                                  | rejected           |
+
+[MEAS] (Appendix A.2), vendored 5.7.2 sources compiled with
+=WOLFSSL_NO_MALLOC + WOLFSSL_STATIC_MEMORY + WOLFSSL_VALIDATE_ECC_KEYGEN= and
+the crate's other flags:
+
+- A. no heap anywhere: =wc_InitRng= fails with =MEMORY_E= (-125) - under
+  static memory even the DRBG state is pool-allocated, =sizeof(WC_RNG)= is 32;
+- B. a 32 KiB pool loaded with =wc_LoadStaticMemory= and registered with
+  =wolfSSL_SetGlobalHeapHint=: =wc_InitRng= 0, =wc_ecc_make_key_ex= 0 (the
+  PCT ran and passed), =wc_ecc_check_key= 0; pool activity: 2 allocations
+  for RNG + keygen/PCT, 0 for sign, 0 for verify, +1 for =wc_ecc_shared_secret=
+  (=ECC_TIMING_RESISTANT= point blinding);
+- C. heap hint on the key and the RNG but no global hint:
+  =wc_ecc_make_key_ex= fails with =MEMORY_E=, confirming that 5.7.2's PCT
+  ignores =key->heap= and that a /global/ hint is required with that code.
+
+*** The static-memory decision
+
+=DECISION= (recommended): adopt =WOLFSSL_STATIC_MEMORY= together with
+=WOLFSSL_NO_MALLOC= as the crate's single memory model (option 1), because:
+
+- =wolf-tls= needs it anyway: the TLS layer cannot run without an allocator,
+  and per-connection pools with fixed IO blocks give deterministic,
+  isolated, zeroizable memory per peer (Part A). One model for the whole
+  stack is simpler to reason about and to audit than "no-malloc for
+  wolfCrypt, pools for TLS, a callback arena for FIPS".
+- It resolves the PCT blocker for /both/ possible shapes of the validated
+  =ecc.c= (global hint for the =NULL=-heap shape, =key->heap= for the other).
+- It is wolfSSL's designed, documented and =configure=-exposed mechanism
+  (=--enable-staticmemory=), hence the most likely of the options to appear
+  on the UG's allowed list; option 2's =wolfSSL_SetAllocators= is equally
+  outside the boundary but relies on =WOLFSSL_NO_MALLOC= semantics in
+  =memory.c= that wolfSSL has evidently not exercised with the FIPS PCT.
+- The measured cost is small (section [[*Memory: per-connection static pools][Memory: per-connection static pools]]; 2-3 pool blocks for
+  all of ECC).
+
+Consequences for =wolf-crypto= (to be done when the vendored sources move
+to 5.9.4, before =wolf-tls=):
+
+- =random::Rng= stops being self-referential (=drbg_data= no longer exists
+  under static memory, so =Rng::anchor= must go behind
+  =cfg(not(feature = "static-memory"))= or simply be removed with the
+  feature always on). =Rng::new()= needs a heap: either =Rng::new_in(&Heap)=
+  with =wc_InitRng_ex(rng, heap, INVALID_DEVID)=, or =Rng::new()= using the
+  crate-global heap. The DRBG state then lives in the pool, which must
+  outlive the =Rng= - a lifetime on =Rng<'h>= expresses this.
+- =ecc::Key= keeps its "no pointers into itself" invariant: =heap= points at
+  the caller's =WOLFSSL_HEAP_HINT=, outside the key. =Key::copy= remains
+  sound. The checklist entry gains "=heap= is the pool hint, which outlives
+  every key created from it".
+- A =Heap= type wraps =WOLFSSL_HEAP_HINT= over a caller-owned
+  =Zeroizing<[u8; N]>= (=wc_LoadStaticMemory_ex= with a crate-chosen bucket
+  list sized from the measurements: for wolfCrypt alone a few 1 KiB blocks
+  suffice; for TLS the per-connection pools of Part A). A crate-global
+  =Heap= (=static= pool behind a =Once=) is registered with
+  =wolfSSL_SetGlobalHeapHint= at =fips::init= / first use so that
+  boundary code allocating with a =NULL= heap lands in it. Because that
+  pool is shared between threads, wolfSSL's pool mutex stays compiled in
+  (no =SINGLE_THREADED=; =WOLFSSL_USER_MUTEX= on =no_std=).
+- Hashes, HMAC, AES, AES-GCM, ChaCha, Poly1305, HKDF and PBKDF2 do not
+  allocate in this configuration (no =WOLFSSL_SMALL_STACK=), so their
+  constructors keep passing a =NULL= heap and their API is unchanged.
+- Fallback if the UG forbids =WOLFSSL_STATIC_MEMORY= but allows
+  =WOLFSSL_NO_MALLOC=: option 2 (allocator callback into a Rust arena) for the
+  wolfCrypt-only FIPS build; it is a day's work and leaves the TLS build on
+  option 1 in non-FIPS mode. If the UG forbids =WOLFSSL_NO_MALLOC= as well,
+  the FIPS build must use the bundle as shipped (libc =malloc= inside the
+  module), and the crate's "no-alloc" guarantee then stops at the FFI
+  boundary for the =fips= feature; this must be stated in the docs rather
+  than papered over.
+
+** Which KDF is approved, and what it means for =kdf::hkdf=
+
+Table 7 of [SP] lists, as the only key-derivation functions: =KDF SSH
+(CVL)=, =KDF TLS (CVL)= v1.2, =TLS v1.2 KDF RFC7627 (CVL)= and =TLS v1.3 KDF
+(CVL)=, all under SP 800-135 rev. 1, and Table 10 adds for the KAS-SSC with
+KDF entry: "Key derivation: Per IG 2.4.B resolution 6 and 7 All KDF's shall
+only be used within their respective protocols." There is no SP 800-56C
+rev. 2 one-/two-step KDF (that is what RFC 5869 HKDF would be approved as),
+no SP 800-108 KBKDF, and no SP 800-132 PBKDF2. 2.11 (p. 25) adds the IG D.C
+statement that "No parts of the TLS protocol other than the approved
+cryptographic algorithms and the KDFs, have been tested".
+
+Consequences:
+
+- The TLS 1.3 key schedule run by wolfSSL's TLS layer (HKDF-Extract /
+  HKDF-Expand-Label through =wc_Tls13_HKDF_Extract_ex= /
+  =wc_Tls13_HKDF_Expand_Label_ex= in =kdf.c=, =wolfssl/wolfcrypt/kdf.h:88-110=,
+  a boundary file) with SHA-384 is an approved use of the module
+  (=FIPS_CAST_KDF_TLS13=). =wolf-tls= over a FIPS build is therefore an
+  approved consumer, and every peer-channel key IronDB derives /inside the
+  TLS handshake/ is approved keying material (=KD_DKM=, Table 18).
+- Stand-alone HKDF (=wc_HKDF= in =hmac.c=, =wolfssl/wolfcrypt/hmac.h:210-224=)
+  is not an approved service of #5548, so the crate's =kdf::hkdf= is
+  correctly behind =allow-non-fips= and must stay there. IronDB must not
+  derive keys from an ECDH =SharedSecret= with HKDF and call that approved;
+  the approved way to turn a P-256 agreement into keys with this module is
+  the TLS 1.3 handshake itself. If IronDB needs an approved stand-alone KDF
+  (for example for data-at-rest keys), it has to wait for a wolfCrypt
+  module whose certificate lists an SP 800-56C or SP 800-108 KDF; the CAST
+  identifier list in [WS] =fips_test.h= (through v7.0.0) contains no HKDF or
+  KBKDF CAST, so no current or announced wolfCrypt module provides one
+  (open question B-4).
+- The same table shows that PBKDF2 is /not/ approved under #5548
+  (=FIPS_CAST_PBKDF2= first appears with v6.0.0 in =fips_test.h=). The
+  crate currently exposes =kdf::FipsPbkdf2= as a =Fips= type; against
+  certificate #5548 that marker is not justified. This document does not
+  change it; it is flagged for the maintainer.
+- AES-GCM in the crate is approved only with the IV rules of policy 2.7.3.a:
+  internal IV generation from the module's DRBG with a nonce of
+  >= 96 bits, or protocol (TLS) external IVs. The crate's =aead::AesGcm=
+  API, which takes a caller-supplied IV, is the "external IV" case and is
+  only approved when the IV comes from the TLS KDF; for IronDB's own
+  at-rest encryption the API would need an =encrypt_with_internal_iv=
+  variant (=wc_AesGcmSetIV= / =wc_AesGcmEncrypt_ex=, =wolfssl/wolfcrypt/aes.h:787-790=). Out of scope here,
+  noted because it falls out of the same table.
+
+** Part B open questions for wolfSSL
+
+- B-1. Exact wrapper naming and =fips.h= contents of the v5.2.3 bundle
+  (needed to generate the =fips= re-export layer), and which wolfSSL
+  release the v5.2.3 bundle currently ships around (=x.x.x= in Table 4).
+- B-2. Does the v5.2.3 =ecc.c= pairwise consistency test allocate with
+  =XMALLOC(..., NULL, ...)= (5.7.2 shape) or with =key->heap= / on the
+  stack (master shape)? Determines whether the global heap hint is required.
+- B-3. Are =WOLFSSL_NO_MALLOC= and =WOLFSSL_STATIC_MEMORY= (and
+  =WOLFSSL_USER_MUTEX=, =SINGLE_THREADED=, =WC_RNG_SEED_CB=,
+  =ECC_USER_CURVES= with only P-256/P-384, =USE_FAST_MATH= versus the
+  SP math the boundary's =sp_*.c= files imply) on the User Guide's list of
+  allowed settings for the module build (policy 6.2)? The policy's Table 3
+  lists =sp_*.c= as the public-key implementation; the vendored build uses
+  =USE_FAST_MATH= (=tfm.c=), which is /not/ in the boundary - the FIPS build
+  may force SP math, which changes =ecc_key= / =mp_int= layout assumptions in
+  =wolfcrypt-update-checklist.org= ("=ecc_key= ... remain plain data").
+- B-4. Is a wolfCrypt module version with an approved SP 800-56C rev. 2
+  (HKDF) or SP 800-108 KDF planned, and does the TLS 1.3 KDF CVL cover the
+  RFC 8446 7.5 exporter path (=wolfSSL_export_keying_material=, =wolfssl/ssl.h:1920=)?
+- B-5. Is dynamic linking of =libwolfssl= the recommended deployment for
+  the in-core integrity check on Linux, and is =fips-hash-offline.sh=
+  supported for a statically linked application that is not built by
+  wolfSSL's own Makefile?
+- B-6. Does the bundle's =wolfSSL= (TLS) layer at that release include the
+  5.9.2/5.9.4 RPK fixes, or must =wolf-tls= on a FIPS build pair the v5.2.3
+  boundary with a newer outer wolfSSL (the policy's "complete replacement"
+  wording suggests the outer release may be updated; the UG must confirm)?
+
+* Appendix A: measurements
+
+All measurements were made on 2026-10-20 on x86_64 Linux with gcc, from
+wolfSSL master =d6051951= ([WS]) for the TLS harness and from the vendored
+5.7.2 sources ([VEN]) for the keygen experiment. The scratch files live under
+=/tmp/wtls= and =/tmp/pct= and are not part of the repository; the profile
+and the harness are reproduced here so that they can be re-run (they are
+the seed of =wolf-tls/tests/loopback.rs=).
+
+** A.1 TLS 1.3 profile and loopback harness
+
+=user_settings.h=:
+
+#+begin_src c
+#define WOLFSSL_USER_IO
+#define NO_FILESYSTEM
+#define WOLFSSL_NO_SOCK
+#define NO_WRITEV
+#define WOLFSSL_NO_GETPID
+#define NO_ASN_TIME
+#define SINGLE_THREADED          /* measurement only, see "Threading" */
+#define HAVE_GETRANDOM           /* measurement only, see "Entropy" */
+#define WOLFSSL_TLS13
+#define WOLFSSL_NO_TLS12
+#define NO_OLD_TLS
+#define HAVE_TLS_EXTENSIONS
+#define HAVE_SUPPORTED_CURVES
+#define HAVE_HKDF
+#define HAVE_RPK
+#define WOLFSSL_MAX_RPK_PINS 1
+#define NO_SESSION_CACHE
+#define NO_PSK
+#define NO_RSA
+#define NO_DH
+#define NO_DSA
+#define NO_MD4
+#define NO_MD5
+#define NO_SHA
+#define NO_RC4
+#define NO_DES3
+#define NO_PWDBASED
+#define NO_ERROR_STRINGS
+#define WOLFSSL_ASN_TEMPLATE
+#define HAVE_ECC
+#define ECC_USER_CURVES
+#define ECC_MIN_KEY_SZ 256
+#define ECC_TIMING_RESISTANT
+#define TFM_TIMING_RESISTANT
+#define USE_FAST_MATH
+#define ECC_SHAMIR
+#define HAVE_AESGCM
+#define WOLFSSL_AES_256
+#define NO_AES_128
+#define NO_AES_192
+#define WOLFSSL_SHA384
+#define WOLFSSL_SHA512
+#define HAVE_HASHDRBG
+#define WOLFSSL_STATIC_MEMORY
+#define WOLFSSL_NO_MALLOC
+#define WOLFSSL_NO_ASN_STRICT
+#+end_src
+
+Compiled units: =src/{ssl,internal,tls,tls13,keys,wolfio}.c= and
+=wolfcrypt/src/{asn,memory,ecc,aes,sha256,sha512,hmac,kdf,random,tfm,wolfmath,hash,coding,error,logging,wc_port,cpuid}.c=
+with =-Os -ffunction-sections -fdata-sections -DWOLFSSL_USER_SETTINGS=,
+linked with =-Wl,--gc-sections= (and =-Wl,--wrap=malloc= for the no-malloc
+proof). Credentials: wolfSSL's test assets
+=certs/rpk/{server,client}-ecc-cert-rpk.der= (91-byte P-256 SPKIs) with
+=certs/ecc-key.der= and =certs/ecc-client-key.der=.
+
+The harness (abridged; the I/O callbacks, the setup and the driver are
+complete, the four cases are as described):
+
+#+begin_src c
+struct pipe { unsigned char buf[1 << 16]; size_t len; };
+struct endpoint { struct pipe* rx; struct pipe* tx; int bytes_in, bytes_out; };
+
+static int cb_recv(WOLFSSL* ssl, char* buf, int sz, void* ctx) {
+    struct endpoint* ep = ctx; size_t n;
+    if (ep->rx->len == 0) return WOLFSSL_CBIO_ERR_WANT_READ;
+    n = (size_t)sz < ep->rx->len ? (size_t)sz : ep->rx->len;
+    memcpy(buf, ep->rx->buf, n); memmove(ep->rx->buf, ep->rx->buf + n, ep->rx->len - n);
+    ep->rx->len -= n; ep->bytes_in += (int)n; return (int)n;
+}
+static int cb_send(WOLFSSL* ssl, char* buf, int sz, void* ctx) {
+    struct endpoint* ep = ctx;
+    if (ep->tx->len + (size_t)sz > sizeof(ep->tx->buf)) return WOLFSSL_CBIO_ERR_GENERAL;
+    memcpy(ep->tx->buf + ep->tx->len, buf, (size_t)sz); ep->tx->len += (size_t)sz;
+    ep->bytes_out += sz; return sz;
+}
+
+#define GEN_SZ (160 * 1024)            /* generous for measuring; 64 KiB is the budget */
+#define IO_SZ  (2 * WOLFMEM_IO_SZ + 1024)
+struct side { unsigned char gen[GEN_SZ], io[IO_SZ]; WOLFSSL_CTX* ctx; WOLFSSL* ssl; struct endpoint ep; };
+
+static int setup(struct side* s, int server, const byte* spki, size_t spkiSz,
+                 const byte* key, size_t keySz, const byte* peer, size_t peerSz, int load_cred) {
+    int groups[1] = { WOLFSSL_ECC_SECP256R1 }; char rpk[1] = { WOLFSSL_CERT_TYPE_RPK };
+    s->ctx = NULL;
+    if (wolfSSL_CTX_load_static_memory(&s->ctx, server ? wolfTLSv1_3_server_method_ex
+            : wolfTLSv1_3_client_method_ex, s->gen, GEN_SZ, WOLFMEM_GENERAL | WOLFMEM_TRACK_STATS, 1)
+            != WOLFSSL_SUCCESS) return -1;
+    if (wolfSSL_CTX_load_static_memory(&s->ctx, NULL, s->io, IO_SZ,
+            WOLFMEM_IO_POOL_FIXED | WOLFMEM_TRACK_STATS, 1) != WOLFSSL_SUCCESS) return -1;
+    wolfSSL_CTX_SetIORecv(s->ctx, cb_recv); wolfSSL_CTX_SetIOSend(s->ctx, cb_send);
+    wolfSSL_CTX_set_verify(s->ctx, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+    if (wolfSSL_CTX_set_cipher_list(s->ctx, "TLS13-AES256-GCM-SHA384") != WOLFSSL_SUCCESS) return -2;
+    if (wolfSSL_CTX_set_groups(s->ctx, groups, 1) != WOLFSSL_SUCCESS) return -3;
+    if (wolfSSL_CTX_set_client_cert_type(s->ctx, rpk, 1) != WOLFSSL_SUCCESS) return -4;
+    if (wolfSSL_CTX_set_server_cert_type(s->ctx, rpk, 1) != WOLFSSL_SUCCESS) return -5;
+    if (load_cred) {
+        if (wolfSSL_CTX_use_certificate_buffer(s->ctx, spki, (long)spkiSz, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) return -6;
+        if (wolfSSL_CTX_use_PrivateKey_buffer(s->ctx, key, (long)keySz, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS) return -7;
+    }
+    if (peer && wolfSSL_CTX_set_expected_rpk(s->ctx, peer, (unsigned)peerSz) != WOLFSSL_SUCCESS) return -8;
+    if ((s->ssl = wolfSSL_new(s->ctx)) == NULL) return -9;
+    wolfSSL_SetIOReadCtx(s->ssl, &s->ep); wolfSSL_SetIOWriteCtx(s->ssl, &s->ep);
+    return 0;
+}
+
+static int drive(struct side* c, struct side* s, int* err_c, int* err_s) {
+    int i, done_c = 0, done_s = 0; *err_c = *err_s = 0;
+    for (i = 0; i < 40 && !(done_c && done_s); i++) {
+        if (!done_c) { int r = wolfSSL_connect(c->ssl); if (r == WOLFSSL_SUCCESS) done_c = 1;
+            else { int e = wolfSSL_get_error(c->ssl, r);
+                   if (e != WOLFSSL_ERROR_WANT_READ && e != WOLFSSL_ERROR_WANT_WRITE) { *err_c = e; return -1; } } }
+        if (!done_s) { int r = wolfSSL_accept(s->ssl); if (r == WOLFSSL_SUCCESS) done_s = 1;
+            else { int e = wolfSSL_get_error(s->ssl, r);
+                   if (e != WOLFSSL_ERROR_WANT_READ && e != WOLFSSL_ERROR_WANT_WRITE) { *err_s = e; return -1; } } }
+    }
+    return (done_c && done_s) ? 0 : -2;
+}
+/* case 1: both pinned correctly, then "ping"/"pong" and close_notify;
+ * case 2: server pins the wrong client key; case 3: client loads no credential;
+ * case 4: client pins the wrong server key. Stats via wolfSSL_is_static_memory /
+ * wolfSSL_CTX_is_static_memory with WOLFMEM_TRACK_STATS. */
+#+end_src
+
+Output:
+
+#+begin_example
+sizeof(WOLFSSL)=1216 sizeof(WOLFSSL_CTX)=280 sizeof(DecodedCert)=3688 WOLFMEM_IO_SZ=16992 STATIC_BUFFER_LEN=5
+case1 mutual RPK pinned: drive=0 err_c=0 err_s=0 cipher=TLS13-AES256-GCM-SHA384 curve=SECP256R1
+  server sees client cert type 2
+  client sees server cert type 2
+  client write=4 / server read=4 ping / server write=4 / client read=4 pong
+client: conn peakMem=27424 curMem=1408 peakAlloc=21 totalAlloc=39 totalFr=34
+server: conn peakMem=27616 curMem=1408 peakAlloc=24 totalAlloc=46 totalFr=41
+client: wire in=534 out=492      server: wire in=492 out=534
+  client shutdown=2 (WOLFSSL_SHUTDOWN_NOT_DONE), server read after close_notify=0 err=6 (ZERO_RETURN)
+  server shutdown=1, client shutdown(2)=1
+case2 wrong client pin on server: drive=-1 err_c=0 err_s=-521 (RPK_UNTRUSTED_E=-521)
+case3 client without credential: drive=-1 err_c=0 err_s=-345 (NO_PEER_CERT=-345)
+case4 wrong server pin on client: drive=-1 err_c=-521 err_s=0
+#+end_example
+
+With =-Wl,--wrap=malloc= and a wrapper that aborts once =wolfSSL_Init()= has
+been called, the run is identical (no abort): nothing in the TLS layer or
+wolfCrypt calls =malloc= under this profile.
+
+Linked size: =text 201058 data 1240 bss 529016= (the bss is the harness's
+two 160 KiB pools plus pipes).
+
+** A.2 ECC pairwise consistency test under static memory (vendored 5.7.2)
+
+Compiled from =wolf-crypto-sys/wolfcrypt/src/wolfcrypt/src/= with the
+crate's defines plus =-DWOLFSSL_STATIC_MEMORY -DWOLFSSL_VALIDATE_ECC_KEYGEN
+-DSINGLE_THREADED= (and =-DWOLFSSL_NO_MALLOC=, as today). Program: load a
+32 KiB pool with =wc_LoadStaticMemory(&hint, pool, sizeof pool,
+WOLFMEM_GENERAL | WOLFMEM_TRACK_STATS, 1)=, then the three cases below.
+
+#+begin_example
+sizeof(WC_RNG)=32 sizeof(ecc_key)=2376
+A: wc_InitRng without any heap: -125 (MEMORY_E=-125)
+B: wc_LoadStaticMemory=0
+B: wc_InitRng with global hint: 0
+B: wc_ecc_init_ex: 0
+B: wc_ecc_make_key_ex (runs pairwise consistency test): 0 (ECC_PCT_E=-286)
+B: wc_ecc_check_key: 0
+B: after keygen totalAlloc=2
+B: sign=0 totalAlloc=2
+B: verify=0 res=1 totalAlloc=2
+B: ecdh=0 totalAlloc=3
+C: wc_InitRng_ex with explicit hint: 0
+C: wc_ecc_make_key_ex with key->heap set but no global hint: -125
+#+end_example
+
+** A.3 Object sizes
+
+=size= over the objects compiled from [WS] with the A.1 profile, =-Os= and
+=-O2= (text bytes): see the table in Part A, "Size of the compiled TLS
+layer". =asn.o= compiled from [VEN] with the crate's current =build.rs=
+flags, =-Os=: =text 44330=.
