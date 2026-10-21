@@ -3,3 +3,8 @@
 This library provides low-level bindings for wolfcrypt by wolfSSL. The bindings are under the MIT
 license (=LICENSE=). The bundled wolfcrypt sources in =wolfcrypt/= are wolfSSL's, under
 GPL-2.0-or-later (=wolfcrypt/COPYING=) unless you have a commercial license from wolfSSL.
+
+The build script generates the bindings with =bindgen=, which needs =libclang= and the C
+toolchain's include paths, and compiles the bundled wolfcrypt sources with the C compiler. On Nix,
+=nix develop= at the repository root provides both (the Rust toolchain stays the caller's);
+elsewhere set =LIBCLANG_PATH= if =libclang= is not found.
