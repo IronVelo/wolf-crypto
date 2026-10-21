@@ -1,6 +1,6 @@
 [package]
 name = "wolf-crypto"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 edition = "2021"
 license = "MIT"
 categories = ["no-std", "no-std::no-alloc", "cryptography"]
@@ -31,7 +31,7 @@ llvm-assume = []
 default = ["can-panic", "allow-non-fips"]
 
 [dependencies]
-wolf-crypto-sys = { version = "0.1.0-alpha.4", path = "../wolf-crypto-sys" }
+wolf-crypto-sys = { version = "0.1.0-alpha.5", path = "../wolf-crypto-sys" }
 zeroize = { version = "1.8.1" }
 embedded-io = { version = "0.6.1", optional = true }
 
